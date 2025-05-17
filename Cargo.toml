@@ -1,0 +1,12 @@
+[package]
+name = "region-diff"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+byteorder = "1.5.0"
+fastnbt = { version = "2.5.0", path = "../fastnbt-btreemap" }
+flate2 = "1.1.1"
+lz4_flex = "0.11.3"
+serde = "1.0.219"
+similar = "2.7.0"
