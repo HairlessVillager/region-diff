@@ -1,5 +1,5 @@
-mod diff;
-mod mca;
+pub mod diff;
+pub mod mca;
 
 #[cfg(test)]
 mod tests {

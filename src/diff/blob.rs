@@ -2,13 +2,17 @@ use std::io::{Cursor, Read};
 
 use super::{Diff, DiffDesError};
 
+// Blob is one kind of git object, another two: Tree, Commit.
+//
+// Blob object in git stores the complete content of the file. The differences
+// (diff) in Git are usually calculated on demand.
 #[derive(Debug)]
-pub struct FullDiff {
+pub struct BlobDiff {
     old_text: Vec<u8>,
     new_text: Vec<u8>,
 }
 
-impl Diff for FullDiff {
+impl Diff for BlobDiff {
     fn new() -> Self {
         Self {
             old_text: vec![],
@@ -117,7 +121,7 @@ mod tests {
         for _ in 0..100_000 {
             let old = old_iter.next().unwrap();
             let new = new_iter.next().unwrap();
-            let diff = FullDiff::from_compare(&old, &new);
+            let diff = BlobDiff::from_compare(&old, &new);
             let patched_old = diff.patch(&old);
             let reverted_new = diff.revert(&new);
             assert_eq!(patched_old, new, "old: {:?}; new: {:?}", old, new);
@@ -133,9 +137,9 @@ mod tests {
             let v0 = v0_iter.next().unwrap();
             let v1 = v1_iter.next().unwrap();
             let v2 = v2_iter.next().unwrap();
-            let diff_v01 = FullDiff::from_compare(&v0, &v1);
-            let diff_v12 = FullDiff::from_compare(&v1, &v2);
-            let merged_diff = FullDiff::from_squash(&diff_v01, &diff_v12);
+            let diff_v01 = BlobDiff::from_compare(&v0, &v1);
+            let diff_v12 = BlobDiff::from_compare(&v1, &v2);
+            let merged_diff = BlobDiff::from_squash(&diff_v01, &diff_v12);
             let patched_v0 = merged_diff.patch(&v0);
             let reverted_v2 = merged_diff.revert(&v2);
             assert_eq!(patched_v0, v2, "v0: {:?}; v1{:?}; v2: {:?}", v0, v1, v2);
@@ -150,9 +154,9 @@ mod tests {
         for _ in 0..100_000 {
             let old = old_iter.next().unwrap();
             let new = new_iter.next().unwrap();
-            let diff = FullDiff::from_compare(&old, &new);
+            let diff = BlobDiff::from_compare(&old, &new);
             let serialized = diff.serialize().unwrap();
-            let deserialized = FullDiff::deserialize(&serialized).unwrap();
+            let deserialized = BlobDiff::deserialize(&serialized).unwrap();
             assert_eq!(diff.old_text, deserialized.old_text);
             assert_eq!(diff.new_text, deserialized.new_text);
         }

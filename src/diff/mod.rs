@@ -1,5 +1,5 @@
-mod full;
-mod myers;
+pub mod blob;
+pub mod myers;
 
 #[derive(Debug)]
 struct DiffDesError {
