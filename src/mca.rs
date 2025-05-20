@@ -10,7 +10,25 @@ struct HeaderEntry {
     sector_count: u64,
     timestamp: u64,
 }
-
+impl HeaderEntry {
+    fn is_available(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.sector_count == 0 && self.sector_offset == 0 {
+            Ok(false)
+        } else if self.sector_offset < 2 {
+            Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Sector {} overlaps with header", self.idx),
+            )))
+        } else if self.sector_count == 0 {
+            Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Sector {} size has to be > 0", self.idx),
+            )))
+        } else {
+            Ok(true)
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub enum LazyChunk {
     Unloaded,
@@ -25,7 +43,7 @@ pub struct ChunkWithTimestamp {
 
 pub struct MCAReader {
     mca_reader: BufReader<File>,
-    header: [Option<HeaderEntry>; 1024],
+    header: [HeaderEntry; 1024],
     chunks: [LazyChunk; 1024],
 }
 
@@ -37,16 +55,25 @@ impl MCAReader {
         let header = read_header(&mut reader)?;
 
         if !lazy {
-            let mut filtered_header: Vec<HeaderEntry> =
-                header.iter().filter_map(|h| h.as_ref()).cloned().collect();
-            filtered_header.sort_by_key(|e| e.sector_offset);
-            for header_entry in filtered_header {
-                let mut sector_buf = vec![0u8; (header_entry.sector_count * 4096) as usize];
-                reader.read_exact(&mut sector_buf)?;
-                chunks[header_entry.idx] = LazyChunk::Some(ChunkWithTimestamp {
-                    timestamp: header_entry.timestamp as i64,
-                    nbt: read_chunk_nbt(&sector_buf)?,
-                });
+            let mut header_refs: Vec<&HeaderEntry> = header.iter().collect();
+            header_refs.sort_by_key(|e| e.sector_offset);
+            for header_entry in header_refs {
+                chunks[header_entry.idx] = match header_entry.sector_offset {
+                    0 => LazyChunk::NotExists,
+                    1..=u64::MAX => {
+                        let mut sector_buf = vec![0u8; (header_entry.sector_count * 4096) as usize];
+                        reader.read_exact(&mut sector_buf).map_err(|e| {
+                            Box::new(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("Sector {} is out of bounds. Original error: {}", header_entry.idx, e),
+                            ))
+                        })?;
+                        LazyChunk::Some(ChunkWithTimestamp {
+                            timestamp: header_entry.timestamp as i64,
+                            nbt: read_chunk_nbt(&sector_buf)?,
+                        })
+                    }
+                }
             }
         }
 
@@ -71,13 +98,10 @@ impl MCAReader {
             return Ok(None);
         }
 
-        let header = match self.header[idx].as_ref() {
-            Some(h) => h,
-            None => {
-                self.chunks[idx] = LazyChunk::NotExists;
-                return Ok(None);
-            }
-        };
+        let header = &self.header[idx];
+        if !header.is_available()? {
+            return Ok(None);
+        }
 
         let mut sector_buf = vec![0u8; (header.sector_count * 4096) as usize];
         self.mca_reader
@@ -103,8 +127,13 @@ impl MCAReader {
 
 fn read_header(
     reader: &mut BufReader<File>,
-) -> Result<[Option<HeaderEntry>; 1024], Box<dyn std::error::Error>> {
-    let mut headers = std::array::from_fn(|_| None);
+) -> Result<[HeaderEntry; 1024], Box<dyn std::error::Error>> {
+    let mut headers = std::array::from_fn(|_| HeaderEntry {
+        idx: 0,
+        sector_offset: 0,
+        sector_count: 0,
+        timestamp: 0,
+    });
 
     // read locations
     for (idx, _offset) in (0x0000..0x0fff).step_by(4).enumerate() {
@@ -112,14 +141,12 @@ fn read_header(
         reader.read_exact(&mut buf)?;
         let sector_offset = u32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as u64;
         let sector_count = buf[3] as u64;
-        if sector_count > 0 && sector_offset > 0 {
-            headers[idx] = Some(HeaderEntry {
-                idx,
-                sector_offset,
-                sector_count,
-                timestamp: 0,
-            });
-        }
+        headers[idx] = HeaderEntry {
+            idx,
+            sector_offset,
+            sector_count,
+            timestamp: 0,
+        };
     }
 
     // read timestamps
@@ -127,17 +154,7 @@ fn read_header(
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf)?;
         let timestamp = i32::from_be_bytes(buf) as u64;
-        match headers[idx] {
-            Some(ref mut header) => header.timestamp = timestamp,
-            None => {
-                if timestamp > 0 {
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Header entry not found",
-                    )));
-                }
-            }
-        }
+        headers[idx].timestamp = timestamp;
     }
 
     Ok(headers)
@@ -242,14 +259,14 @@ mod tests {
         let headers = read_header(&mut reader)?;
 
         // test header for first chunk
-        let header_entry = headers[0].as_ref().unwrap();
+        let header_entry = &headers[0];
         assert_eq!(header_entry.sector_offset, 2);
         assert_eq!(header_entry.sector_count, 1);
         assert_eq!(header_entry.timestamp, 1);
 
         // test header for second chunk should be empty
-        let header_entry = headers[1].as_ref();
-        assert!(header_entry.is_none());
+        let header_entry = &headers[1];
+        assert!(!header_entry.is_available()?);
 
         Ok(())
     }
@@ -267,14 +284,14 @@ mod tests {
                 assert_eq!(chunk.timestamp, 1);
                 assert!(!chunk.nbt.is_empty());
             }
-            _ => panic!("Chunk should be Some"),
+            _ => panic!("Chunk should be Some, but got {:?}", chunk),
         }
 
         // test second chunk should be empty
         let chunk = mca.chunks[1].clone();
         match chunk {
             LazyChunk::NotExists => (),
-            _ => panic!("Chunk should be NotExists"),
+            _ => panic!("Chunk should be NotExists, but got {:?}", chunk),
         }
 
         Ok(())

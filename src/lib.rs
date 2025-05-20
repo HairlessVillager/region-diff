@@ -1,6 +1,8 @@
 mod mca;
+mod diff;
 
 pub use mca::MCAReader;
+pub use diff::Diff;
 
 #[cfg(test)]
 mod tests {
