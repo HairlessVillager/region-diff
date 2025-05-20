@@ -1,8 +1,5 @@
-mod mca;
 mod diff;
-
-pub use mca::MCAReader;
-pub use diff::Diff;
+mod mca;
 
 #[cfg(test)]
 mod tests {
@@ -97,15 +94,18 @@ mod tests {
             "./mca-test-data/r.1.2.20250511.mca",
             "./mca-test-data/r.1.2.20250516.mca",
         ];
-        let nbts = files.iter().map(|file| {
-            let mut reader = MCAReader::from_file(file, true).unwrap();
-            let chunk = reader.get_chunk(15, 20).unwrap();
-            let nbt = match chunk {
-                Some(chunk) => &chunk.nbt,
-                _ => panic!("Chunk should be Some"),
-            };
-            nbt.clone()
-        }).collect::<Vec<_>>();
+        let nbts = files
+            .iter()
+            .map(|file| {
+                let mut reader = MCAReader::from_file(file, true).unwrap();
+                let chunk = reader.get_chunk(15, 20).unwrap();
+                let nbt = match chunk {
+                    Some(chunk) => &chunk.nbt,
+                    _ => panic!("Chunk should be Some"),
+                };
+                nbt.clone()
+            })
+            .collect::<Vec<_>>();
 
         let ops = capture_diff_slices(Algorithm::Myers, &nbts[0], &nbts[1]);
         let mut ops_count: usize = 0;

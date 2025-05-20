@@ -1,8 +1,16 @@
+use similar::{Algorithm, DiffOp, capture_diff_slices};
 use std::io::{Cursor, Read, Seek};
 
-use similar::{Algorithm, DiffOp, capture_diff_slices};
+use super::{Diff, DiffDesError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+pub struct MyersDiff {
+    old_text: Vec<u8>,
+    new_text: Vec<u8>,
+    replaces: Vec<Replace>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct Replace {
     old_idx: usize,
     old_len: usize,
@@ -23,17 +31,10 @@ struct SquashingReplaceEndpoint {
 
 #[derive(Debug)]
 enum NamedReplaceEndpoint {
-    BO(BaseReplaceEndpoint), // Base Diff Openning
-    BC(BaseReplaceEndpoint), // Base Diff Closed
+    BO(BaseReplaceEndpoint),      // Base Diff Openning
+    BC(BaseReplaceEndpoint),      // Base Diff Closed
     SO(SquashingReplaceEndpoint), // Squashing Diff Openning
     SC(SquashingReplaceEndpoint), // Squashing Diff Closed
-}
-
-#[derive(Debug)]
-pub struct Diff {
-    old_text: Vec<u8>,
-    new_text: Vec<u8>,
-    replaces: Vec<Replace>,
 }
 
 #[derive(Debug)]
@@ -42,15 +43,15 @@ enum VxPtr {
     Disable(usize),
 }
 
-impl Diff {
-    pub fn new() -> Self {
-        Diff {
+impl Diff for MyersDiff {
+    fn new() -> Self {
+        Self {
             old_text: vec![],
             new_text: vec![],
             replaces: vec![],
         }
     }
-    pub fn from(old: &[u8], new: &[u8]) -> Self {
+    fn from_compare(old: &[u8], new: &[u8]) -> Self {
         let mut diff = Self::new();
         let ops = capture_diff_slices(Algorithm::Myers, old, new);
         let mut old_ptr = 0;
@@ -120,11 +121,123 @@ impl Diff {
         diff
     }
 
-    pub fn from_squash(base: &Self, squashing: &Self) -> Self {
+    fn from_squash(base: &Self, squashing: &Self) -> Self {
         let endpoints = Self::build_endpoints(&base, &squashing);
         Self::build_diff(&base, &squashing, &endpoints)
     }
 
+    fn patch(&self, old: &[u8]) -> Vec<u8> {
+        let capacity = old.len() - self.old_text.len() + self.new_text.len();
+        let mut patched = Vec::with_capacity(capacity);
+
+        let mut old_ptr: usize = 0;
+        let mut new_text_ptr: usize = 0;
+        for replace in &self.replaces {
+            patched.extend_from_slice(&old[old_ptr..replace.old_idx]);
+            patched.extend_from_slice(&self.new_text[new_text_ptr..new_text_ptr + replace.new_len]);
+            old_ptr = replace.old_idx + replace.old_len;
+            new_text_ptr += replace.new_len;
+        }
+        patched.extend_from_slice(&old[old_ptr..]);
+
+        patched
+    }
+
+    fn revert(&self, new: &[u8]) -> Vec<u8> {
+        let capacity = new.len() - self.new_text.len() + self.old_text.len();
+        let mut patched = Vec::with_capacity(capacity);
+
+        let mut new_ptr: usize = 0;
+        let mut old_text_ptr: usize = 0;
+        for replace in &self.replaces {
+            patched.extend_from_slice(&new[new_ptr..replace.new_idx]);
+            patched.extend_from_slice(&self.old_text[old_text_ptr..old_text_ptr + replace.old_len]);
+            new_ptr = replace.new_idx + replace.new_len;
+            old_text_ptr += replace.old_len;
+        }
+        patched.extend_from_slice(&new[new_ptr..]);
+
+        patched
+    }
+
+    fn serialize(&self) -> Result<Vec<u8>, ()> {
+        let capacity_bytes =
+            32 + self.old_text.len() + self.new_text.len() + self.replaces.len() * 32;
+        let mut buffer: Vec<u8> = Vec::with_capacity(capacity_bytes);
+
+        // header
+        buffer.extend_from_slice(0x4e7f8a9d9e0f1a2bu64.to_be_bytes().as_slice());
+        buffer.extend_from_slice(&(self.old_text.len() as u64).to_be_bytes());
+        buffer.extend_from_slice(&(self.new_text.len() as u64).to_be_bytes());
+        buffer.extend_from_slice(&(self.replaces.len() as u64).to_be_bytes());
+
+        // body
+        buffer.extend_from_slice(&self.old_text);
+        buffer.extend_from_slice(&self.new_text);
+        for replace in &self.replaces {
+            buffer.extend_from_slice(&(replace.old_idx as u64).to_be_bytes());
+            buffer.extend_from_slice(&(replace.old_len as u64).to_be_bytes());
+            buffer.extend_from_slice(&(replace.new_idx as u64).to_be_bytes());
+            buffer.extend_from_slice(&(replace.new_len as u64).to_be_bytes());
+        }
+        Ok(buffer)
+    }
+
+    fn deserialize(bytes: &[u8]) -> Result<Self, DiffDesError>
+    where
+        Self: Sized,
+    {
+        if bytes.len() < 32 {
+            return Err(DiffDesError {
+                msg: "Buffer is too small".to_string(),
+            });
+        }
+        let mut cursor = Cursor::new(bytes);
+        let mut buffer = [0u8; 8];
+
+        // header
+        cursor.read_exact(&mut buffer).unwrap();
+        let magic_number = u64::from_be_bytes(buffer);
+        if magic_number != 0x4e7f8a9d9e0f1a2bu64 {
+            return Err(DiffDesError {
+                msg: "Invalid magic number".to_string(),
+            });
+        }
+        cursor.read_exact(&mut buffer).unwrap();
+        let old_len = u64::from_be_bytes(buffer) as usize;
+        cursor.read_exact(&mut buffer).unwrap();
+        let new_len = u64::from_be_bytes(buffer) as usize;
+        cursor.read_exact(&mut buffer).unwrap();
+        let replaces_len = u64::from_be_bytes(buffer) as usize;
+
+        // body
+        let mut diff = Self::new();
+        diff.old_text.resize(old_len, 0);
+        diff.new_text.resize(new_len, 0);
+        cursor.read_exact(&mut diff.old_text).unwrap();
+        cursor.read_exact(&mut diff.new_text).unwrap();
+
+        for _ in 0..replaces_len {
+            cursor.read_exact(&mut buffer).unwrap();
+            let old_idx = u64::from_be_bytes(buffer) as usize;
+            cursor.read_exact(&mut buffer).unwrap();
+            let old_len = u64::from_be_bytes(buffer) as usize;
+            cursor.read_exact(&mut buffer).unwrap();
+            let new_idx = u64::from_be_bytes(buffer) as usize;
+            cursor.read_exact(&mut buffer).unwrap();
+            let new_len = u64::from_be_bytes(buffer) as usize;
+            diff.replaces.push(Replace {
+                old_idx,
+                old_len,
+                new_idx,
+                new_len,
+            });
+        }
+        Ok(diff)
+    }
+}
+
+impl MyersDiff {
     fn build_endpoints(base: &Self, squashing: &Self) -> Vec<NamedReplaceEndpoint> {
         let mut endpoints: Vec<NamedReplaceEndpoint> = base
             .replaces
@@ -312,40 +425,6 @@ impl Diff {
 
         diff
     }
-
-    pub fn patch(&self, old: &[u8]) -> Vec<u8> {
-        let capacity = old.len() - self.old_text.len() + self.new_text.len();
-        let mut patched = Vec::with_capacity(capacity);
-
-        let mut old_ptr: usize = 0;
-        let mut new_text_ptr: usize = 0;
-        for replace in &self.replaces {
-            patched.extend_from_slice(&old[old_ptr..replace.old_idx]);
-            patched.extend_from_slice(&self.new_text[new_text_ptr..new_text_ptr + replace.new_len]);
-            old_ptr = replace.old_idx + replace.old_len;
-            new_text_ptr += replace.new_len;
-        }
-        patched.extend_from_slice(&old[old_ptr..]);
-
-        patched
-    }
-
-    pub fn revert(&self, new: &[u8]) -> Vec<u8> {
-        let capacity = new.len() - self.new_text.len() + self.old_text.len();
-        let mut patched = Vec::with_capacity(capacity);
-
-        let mut new_ptr: usize = 0;
-        let mut old_text_ptr: usize = 0;
-        for replace in &self.replaces {
-            patched.extend_from_slice(&new[new_ptr..replace.new_idx]);
-            patched.extend_from_slice(&self.old_text[old_text_ptr..old_text_ptr + replace.old_len]);
-            new_ptr = replace.new_idx + replace.new_len;
-            old_text_ptr += replace.old_len;
-        }
-        patched.extend_from_slice(&new[new_ptr..]);
-
-        patched
-    }
 }
 
 #[cfg(test)]
@@ -372,7 +451,7 @@ mod tests {
         for _ in 0..100_000 {
             let old = old_iter.next().unwrap();
             let new = new_iter.next().unwrap();
-            let diff = Diff::from(&old, &new);
+            let diff = MyersDiff::from_compare(&old, &new);
             let patched_old = diff.patch(&old);
             let reverted_new = diff.revert(&new);
             assert_eq!(patched_old, new, "old: {:?}; new: {:?}", old, new);
@@ -388,9 +467,9 @@ mod tests {
             let v0 = v0_iter.next().unwrap();
             let v1 = v1_iter.next().unwrap();
             let v2 = v2_iter.next().unwrap();
-            let diff_v01 = Diff::from(&v0, &v1);
-            let diff_v12 = Diff::from(&v1, &v2);
-            let merged_diff = Diff::from_squash(&diff_v01, &diff_v12);
+            let diff_v01 = MyersDiff::from_compare(&v0, &v1);
+            let diff_v12 = MyersDiff::from_compare(&v1, &v2);
+            let merged_diff = MyersDiff::from_squash(&diff_v01, &diff_v12);
             let patched_v0 = merged_diff.patch(&v0);
             let reverted_v2 = merged_diff.revert(&v2);
             assert_eq!(patched_v0, v2, "v0: {:?}; v1{:?}; v2: {:?}", v0, v1, v2);
@@ -399,16 +478,18 @@ mod tests {
     }
 
     #[test]
-    fn test_merge() {
-        let v0: Vec<u8> = vec![2, 0, 1];
-        let v1: Vec<u8> = vec![2, 1];
-        let v2: Vec<u8> = vec![2, 1, 2, 2];
-        let diff_v01 = Diff::from(&v0, &v1);
-        let diff_v12 = Diff::from(&v1, &v2);
-        let merged_diff = Diff::from_squash(&diff_v01, &diff_v12);
-        let patched_v0 = merged_diff.patch(&v0);
-        let reverted_v2 = merged_diff.revert(&v2);
-        assert_eq!(patched_v0, v2);
-        assert_eq!(reverted_v2, v0);
+    fn test_serialize_deserialize() {
+        let mut old_iter = create_test_bytes(114514);
+        let mut new_iter = create_test_bytes(1919810);
+        for _ in 0..100_000 {
+            let old = old_iter.next().unwrap();
+            let new = new_iter.next().unwrap();
+            let diff = MyersDiff::from_compare(&old, &new);
+            let serialized = diff.serialize().unwrap();
+            let deserialized = MyersDiff::deserialize(&serialized).unwrap();
+            assert_eq!(diff.old_text, deserialized.old_text);
+            assert_eq!(diff.new_text, deserialized.new_text);
+            assert_eq!(diff.replaces, deserialized.replaces);
+        }
     }
 }
