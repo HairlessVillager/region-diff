@@ -1,7 +1,9 @@
 use similar::{Algorithm, DiffOp, capture_diff_slices};
 use std::io::{Cursor, Read, Seek};
 
-use super::{Diff, DiffDesError};
+use crate::object::{Object, ObjectDeserializieError, ObjectHash};
+
+use super::Diff;
 
 #[derive(Debug)]
 pub struct MyersDiff {
@@ -44,15 +46,12 @@ enum VxPtr {
 }
 
 impl Diff for MyersDiff {
-    fn new() -> Self {
-        Self {
-            old_text: vec![],
-            new_text: vec![],
-            replaces: vec![],
-        }
-    }
     fn from_compare(old: &[u8], new: &[u8]) -> Self {
-        let mut diff = Self::new();
+        let mut diff = Self {
+            old_text: Vec::new(),
+            new_text: Vec::new(),
+            replaces: Vec::new(),
+        };
         let ops = capture_diff_slices(Algorithm::Myers, old, new);
         let mut old_ptr = 0;
         let mut new_ptr = 0;
@@ -159,7 +158,9 @@ impl Diff for MyersDiff {
 
         patched
     }
+}
 
+impl Object for MyersDiff {
     fn serialize(&self) -> Result<Vec<u8>, ()> {
         let capacity_bytes =
             32 + self.old_text.len() + self.new_text.len() + self.replaces.len() * 32;
@@ -183,12 +184,12 @@ impl Diff for MyersDiff {
         Ok(buffer)
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, DiffDesError>
+    fn deserialize(bytes: &[u8]) -> Result<Self, ObjectDeserializieError>
     where
         Self: Sized,
     {
         if bytes.len() < 32 {
-            return Err(DiffDesError {
+            return Err(ObjectDeserializieError {
                 msg: "Buffer is too small".to_string(),
             });
         }
@@ -199,7 +200,7 @@ impl Diff for MyersDiff {
         cursor.read_exact(&mut buffer).unwrap();
         let magic_number = u64::from_be_bytes(buffer);
         if magic_number != 0x4e7f8a9d9e0f1a2bu64 {
-            return Err(DiffDesError {
+            return Err(ObjectDeserializieError {
                 msg: "Invalid magic number".to_string(),
             });
         }
@@ -211,7 +212,11 @@ impl Diff for MyersDiff {
         let replaces_len = u64::from_be_bytes(buffer) as usize;
 
         // body
-        let mut diff = Self::new();
+        let mut diff = Self {
+            old_text: Vec::new(),
+            new_text: Vec::new(),
+            replaces: Vec::new(),
+        };
         diff.old_text.resize(old_len, 0);
         diff.new_text.resize(new_len, 0);
         cursor.read_exact(&mut diff.old_text).unwrap();
@@ -235,8 +240,10 @@ impl Diff for MyersDiff {
         }
         Ok(diff)
     }
+    fn hash(&self) -> ObjectHash {
+        todo!()
+    }
 }
-
 impl MyersDiff {
     fn build_endpoints(base: &Self, squashing: &Self) -> Vec<NamedReplaceEndpoint> {
         let mut endpoints: Vec<NamedReplaceEndpoint> = base
@@ -278,7 +285,11 @@ impl MyersDiff {
         endpoints
     }
     fn build_diff(base: &Self, squashing: &Self, endpoints: &Vec<NamedReplaceEndpoint>) -> Self {
-        let mut diff = Self::new();
+        let mut diff = Self {
+            old_text: Vec::new(),
+            new_text: Vec::new(),
+            replaces: Vec::new(),
+        };
 
         let mut v0_ptr = VxPtr::Disable(0);
         let mut v1_ptr = VxPtr::Disable(0);

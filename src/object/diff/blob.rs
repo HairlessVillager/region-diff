@@ -1,6 +1,8 @@
 use std::io::{Cursor, Read};
 
-use super::{Diff, DiffDesError};
+use crate::object::{Object, ObjectDeserializieError, ObjectHash};
+
+use super::Diff;
 
 // Blob is one kind of git object, another two: Tree, Commit.
 //
@@ -13,12 +15,6 @@ pub struct BlobDiff {
 }
 
 impl Diff for BlobDiff {
-    fn new() -> Self {
-        Self {
-            old_text: vec![],
-            new_text: vec![],
-        }
-    }
     fn from_compare(old: &[u8], new: &[u8]) -> Self {
         Self {
             old_text: old.to_vec(),
@@ -42,7 +38,9 @@ impl Diff for BlobDiff {
         let _ = new;
         self.old_text.clone()
     }
+}
 
+impl Object for BlobDiff {
     fn serialize(&self) -> Result<Vec<u8>, ()> {
         let capacity_bytes = 32 + self.old_text.len() + self.new_text.len();
         let mut buffer: Vec<u8> = Vec::with_capacity(capacity_bytes);
@@ -59,12 +57,12 @@ impl Diff for BlobDiff {
         Ok(buffer)
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, DiffDesError>
+    fn deserialize(bytes: &[u8]) -> Result<Self, ObjectDeserializieError>
     where
         Self: Sized,
     {
         if bytes.len() < 32 {
-            return Err(DiffDesError {
+            return Err(ObjectDeserializieError {
                 msg: "Buffer is too small".to_string(),
             });
         }
@@ -75,7 +73,7 @@ impl Diff for BlobDiff {
         cursor.read_exact(&mut buffer).unwrap();
         let magic_number = u64::from_be_bytes(buffer);
         if magic_number != 0x4e7f8a9d9e0f1a2bu64 {
-            return Err(DiffDesError {
+            return Err(ObjectDeserializieError {
                 msg: "Invalid magic number".to_string(),
             });
         }
@@ -87,7 +85,10 @@ impl Diff for BlobDiff {
         let _replaces_len = u64::from_be_bytes(buffer) as usize;
 
         // body
-        let mut diff = Self::new();
+        let mut diff = Self {
+            old_text: Vec::new(),
+            new_text: Vec::new(),
+        };
         diff.old_text.resize(old_len, 0);
         diff.new_text.resize(new_len, 0);
         cursor.read_exact(&mut diff.old_text).unwrap();
@@ -95,8 +96,11 @@ impl Diff for BlobDiff {
 
         Ok(diff)
     }
-}
 
+    fn hash(&self) -> ObjectHash {
+        todo!()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

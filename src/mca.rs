@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, Read, Seek, SeekFrom},
+    io::{BufReader, Cursor, Read, Seek, SeekFrom},
 };
 
 #[derive(Debug, Clone)]
@@ -41,16 +41,14 @@ pub struct ChunkWithTimestamp {
     pub nbt: Vec<u8>,
 }
 
-pub struct MCAReader {
-    mca_reader: BufReader<File>,
+pub struct MCAReader<R: Read + Seek> {
+    mca_reader: R,
     header: [HeaderEntry; 1024],
     chunks: [LazyChunk; 1024],
 }
 
-impl MCAReader {
-    pub fn from_file(file_path: &str, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
-        let file = File::open(file_path)?;
-        let mut reader = BufReader::new(file);
+impl<R: Read + Seek> MCAReader<R> {
+    fn from_reader(mut reader: R, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let mut chunks = [const { LazyChunk::Unloaded }; 1024];
         let header = read_header(&mut reader)?;
 
@@ -82,7 +80,6 @@ impl MCAReader {
                 }
             }
         }
-
         Ok(Self {
             mca_reader: reader,
             header,
@@ -131,8 +128,21 @@ impl MCAReader {
     }
 }
 
-fn read_header(
-    reader: &mut BufReader<File>,
+impl MCAReader<BufReader<File>> {
+    pub fn from_file(path: &str, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        Self::from_reader(reader, lazy)
+    }
+}
+impl<'a> MCAReader<Cursor<&'a Vec<u8>>> {
+    pub fn from_bytes(bytes: &'a Vec<u8>) -> Result<Self, Box<dyn std::error::Error>> {
+        let reader = Cursor::new(bytes);
+        Self::from_reader(reader, false)
+    }
+}
+fn read_header<R: Read + Seek>(
+    reader: &mut R,
 ) -> Result<[HeaderEntry; 1024], Box<dyn std::error::Error>> {
     let mut headers = std::array::from_fn(|_| HeaderEntry {
         idx: 0,
@@ -210,16 +220,11 @@ fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Erro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
     use std::io::Write;
-    use std::path::Path;
 
-    fn create_test_mca(test_file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        if Path::new(test_file_path).exists() {
-            return Ok(());
-        }
-
-        let mut file = File::create(test_file_path)?;
+    fn create_test_mca() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut buffer = Vec::new();
+        let mut file = Cursor::new(&mut buffer);
 
         let mut header = vec![0u8; 8192];
 
@@ -253,16 +258,14 @@ mod tests {
         let padding = vec![0u8; 4096 - (compressed.len() + 4)];
         file.write_all(&padding)?;
 
-        Ok(())
+        Ok(buffer)
     }
 
     #[test]
-    fn test_header_reading() -> Result<(), Box<dyn std::error::Error>> {
-        create_test_mca("test.mca")?;
-
-        let file = File::open("test.mca")?;
-        let mut reader = BufReader::new(file);
-        let headers = read_header(&mut reader)?;
+    fn test_header_reading() {
+        let mut mca = create_test_mca().unwrap();
+        let mut reader = Cursor::new(&mut mca);
+        let headers = read_header(&mut reader).unwrap();
 
         // test header for first chunk
         let header_entry = &headers[0];
@@ -272,16 +275,13 @@ mod tests {
 
         // test header for second chunk should be empty
         let header_entry = &headers[1];
-        assert!(!header_entry.is_available()?);
-
-        Ok(())
+        assert!(!header_entry.is_available().unwrap());
     }
 
     #[test]
-    fn test_mca_file_reading() -> Result<(), Box<dyn std::error::Error>> {
-        create_test_mca("test.mca")?;
-
-        let mca = MCAReader::from_file("test.mca", false)?;
+    fn test_mca_file_reading() {
+        let mut mca = create_test_mca().unwrap();
+        let mca = MCAReader::from_bytes(&mut mca).unwrap();
 
         // test first chunk
         let chunk = mca.chunks[0].clone();
@@ -299,19 +299,17 @@ mod tests {
             LazyChunk::NotExists => (),
             _ => panic!("Chunk should be NotExists, but got {:?}", chunk),
         }
-
-        Ok(())
     }
 
     #[test]
     fn test_real_files_reading() {
-        let paths = vec![
-            "./mca-test-data/r.1.2.20250511.mca",
-            "./mca-test-data/r.1.2.20250512.mca",
-            "./mca-test-data/r.1.2.20250513.mca",
-            "./mca-test-data/r.1.2.20250514.mca",
-            "./mca-test-data/r.1.2.20250515.mca",
-            "./mca-test-data/r.1.2.20250516.mca",
+        let paths: Vec<&'static str> = vec![
+            "./resources/mca/r.1.2.20250511.mca",
+            "./resources/mca/r.1.2.20250512.mca",
+            "./resources/mca/r.1.2.20250513.mca",
+            "./resources/mca/r.1.2.20250514.mca",
+            "./resources/mca/r.1.2.20250515.mca",
+            "./resources/mca/r.1.2.20250516.mca",
         ];
         for path in paths {
             let mut reader = MCAReader::from_file(path, false).unwrap();
@@ -348,5 +346,4 @@ mod tests {
 
         Ok(())
     }
-
 }
