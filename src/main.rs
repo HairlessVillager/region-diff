@@ -1,3 +1,4 @@
+mod diff;
 mod mca;
 mod object;
 

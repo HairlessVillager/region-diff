@@ -1,6 +1,9 @@
 pub mod blob;
 pub mod myers;
 pub mod region;
+pub use blob::BlobDiff;
+pub use myers::MyersDiff;
+pub use region::RegionDiff;
 
 pub trait Diff {
     fn from_compare(old: &[u8], new: &[u8]) -> Self

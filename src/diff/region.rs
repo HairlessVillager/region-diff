@@ -1,10 +1,6 @@
-use std::collections::BTreeMap;
-
-use fastnbt::Value;
-
-use crate::object::{Object, ObjectDeserializieError, ObjectHash};
-
 use super::{Diff, blob::BlobDiff, myers::MyersDiff};
+use fastnbt::Value;
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 struct NbtDiff {
@@ -244,50 +240,12 @@ impl Diff for RegionDiff {
     }
 }
 
-impl Object for RegionDiff {
-    fn serialize(&self) -> Result<Vec<u8>, ()> {
-        todo!()
-    }
-
-    fn deserialize(bytes: &[u8]) -> Result<Self, ObjectDeserializieError>
-    where
-        Self: Sized,
-    {
-        todo!()
-    }
-
-    fn hash(&self) -> ObjectHash {
-        todo!()
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::mca::MCAReader;
     use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
 
-    use crate::mca::MCAReader;
-
-    use super::*;
-
-    // fn get_test_files(seed: u64) -> impl Iterator<Item = Vec<u8>> {
-    //     use rand::prelude::*;
-    //     let mut rng = StdRng::seed_from_u64(seed);
-    //     let mut paths = vec![
-    //         "./resources/mca/r.1.2.20250511.mca",
-    //         "./resources/mca/r.1.2.20250512.mca",
-    //         "./resources/mca/r.1.2.20250513.mca",
-    //         "./resources/mca/r.1.2.20250514.mca",
-    //         "./resources/mca/r.1.2.20250515.mca",
-    //         "./resources/mca/r.1.2.20250516.mca",
-    //     ];
-    //     paths.shuffle(&mut rng);
-    //     paths.into_iter().map(|path| {
-    //         let mut file = File::open(path).unwrap();
-    //         let mut buffer = Vec::new();
-    //         file.read_to_end(&mut buffer);
-    //         buffer
-    //     })
-    // }
     fn get_test_chunk(path: &str, seed: u64) -> impl Iterator<Item = Vec<u8>> {
         let mut reader = MCAReader::from_file(path, false).unwrap();
         let mut xzs = [(0, 0); 1024];

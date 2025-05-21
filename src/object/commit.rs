@@ -1,11 +1,9 @@
-use std::collections::{BTreeMap, HashMap};
-
-use super::diff::Diff;
-type RelativeFilePath = String;
+use super::ObjectHash;
 
 struct Commit {
-    tree: BTreeMap<RelativeFilePath, Box<dyn Diff>>,
+    upstreams: Vec<ObjectHash>,
+    tree: ObjectHash,
+    metadata: CommitMetadata,
 }
-pub struct CommitGraph {
-    adjacency_list: HashMap,
-}
+
+struct CommitMetadata {}
