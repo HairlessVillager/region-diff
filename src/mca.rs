@@ -61,11 +61,17 @@ impl MCAReader {
                 chunks[header_entry.idx] = match header_entry.sector_offset {
                     0 => LazyChunk::NotExists,
                     1..=u64::MAX => {
+                        let offset = header_entry.sector_offset * 4096;
+                        let _ = reader.seek(std::io::SeekFrom::Start(offset));
+
                         let mut sector_buf = vec![0u8; (header_entry.sector_count * 4096) as usize];
                         reader.read_exact(&mut sector_buf).map_err(|e| {
                             Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
-                                format!("Sector {} is out of bounds. Original error: {}", header_entry.idx, e),
+                                format!(
+                                    "Sector {} is out of bounds. Original error: {}",
+                                    header_entry.idx, e
+                                ),
                             ))
                         })?;
                         LazyChunk::Some(ChunkWithTimestamp {
@@ -295,6 +301,26 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_real_files_reading() {
+        let paths = vec![
+            "./mca-test-data/r.1.2.20250511.mca",
+            "./mca-test-data/r.1.2.20250512.mca",
+            "./mca-test-data/r.1.2.20250513.mca",
+            "./mca-test-data/r.1.2.20250514.mca",
+            "./mca-test-data/r.1.2.20250515.mca",
+            "./mca-test-data/r.1.2.20250516.mca",
+        ];
+        for path in paths {
+            let mut reader = MCAReader::from_file(path, false).unwrap();
+            for x in 0..32 {
+                for z in 0..32 {
+                    let _ = reader.get_chunk(x, z).unwrap();
+                }
+            }
+        }
     }
     #[test]
     fn test_fastnbt_works() -> Result<(), Box<dyn std::error::Error>> {
