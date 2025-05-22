@@ -1,3 +1,7 @@
+use std::io::{Cursor, Read};
+
+use crate::object::{BytesSerDe, BytesSerDeError, Object, ObjectHash};
+
 use super::Diff;
 
 // Blob is one kind of git object, another two: Tree, Commit.
@@ -6,8 +10,8 @@ use super::Diff;
 // (diff) in Git are usually calculated on demand.
 #[derive(Debug)]
 pub struct BlobDiff {
-    pub old_text: Vec<u8>,
-    pub new_text: Vec<u8>,
+    old_text: Vec<u8>,
+    new_text: Vec<u8>,
 }
 
 impl Diff for BlobDiff {
@@ -36,6 +40,59 @@ impl Diff for BlobDiff {
     }
 }
 
+impl BytesSerDe for BlobDiff {
+    fn serialize(&self) -> Result<Vec<u8>, ()> {
+        let capacity_bytes = 32 + self.old_text.len() + self.new_text.len();
+        let mut buffer: Vec<u8> = Vec::with_capacity(capacity_bytes);
+
+        // header
+        buffer.extend_from_slice(0x4e7f8a9d9e0f1a2bu64.to_be_bytes().as_slice());
+        buffer.extend_from_slice(&(self.old_text.len() as u64).to_be_bytes());
+        buffer.extend_from_slice(&(self.new_text.len() as u64).to_be_bytes());
+        buffer.extend_from_slice(0u64.to_be_bytes().as_slice());
+
+        // body
+        buffer.extend_from_slice(&self.old_text);
+        buffer.extend_from_slice(&self.new_text);
+        Ok(buffer)
+    }
+
+    fn deserialize(bytes: &[u8]) -> Result<Self, BytesSerDeError>
+    where
+        Self: Sized,
+    {
+        if bytes.len() < 32 {
+            return Err(BytesSerDeError::new("Buffer is too small".to_string()));
+        }
+        let mut cursor = Cursor::new(bytes);
+        let mut buffer = [0u8; 8];
+
+        // header
+        cursor.read_exact(&mut buffer).unwrap();
+        let magic_number = u64::from_be_bytes(buffer);
+        if magic_number != 0x4e7f8a9d9e0f1a2bu64 {
+            return Err(BytesSerDeError::new("Invalid magic number".to_string()));
+        }
+        cursor.read_exact(&mut buffer).unwrap();
+        let old_len = u64::from_be_bytes(buffer) as usize;
+        cursor.read_exact(&mut buffer).unwrap();
+        let new_len = u64::from_be_bytes(buffer) as usize;
+        cursor.read_exact(&mut buffer).unwrap();
+        let _replaces_len = u64::from_be_bytes(buffer) as usize;
+
+        // body
+        let mut diff = Self {
+            old_text: Vec::new(),
+            new_text: Vec::new(),
+        };
+        diff.old_text.resize(old_len, 0);
+        diff.new_text.resize(new_len, 0);
+        cursor.read_exact(&mut diff.old_text).unwrap();
+        cursor.read_exact(&mut diff.new_text).unwrap();
+
+        Ok(diff)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,6 +140,21 @@ mod tests {
             let reverted_v2 = merged_diff.revert(&v2);
             assert_eq!(patched_v0, v2, "v0: {:?}; v1{:?}; v2: {:?}", v0, v1, v2);
             assert_eq!(reverted_v2, v0, "v0: {:?}; v1{:?}; v2: {:?}", v0, v1, v2);
+        }
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let mut old_iter = create_test_bytes(114514);
+        let mut new_iter = create_test_bytes(1919810);
+        for _ in 0..100_000 {
+            let old = old_iter.next().unwrap();
+            let new = new_iter.next().unwrap();
+            let diff = BlobDiff::from_compare(&old, &new);
+            let serialized = diff.serialize().unwrap();
+            let deserialized = BlobDiff::deserialize(&serialized).unwrap();
+            assert_eq!(diff.old_text, deserialized.old_text);
+            assert_eq!(diff.new_text, deserialized.new_text);
         }
     }
 }

@@ -5,7 +5,9 @@ pub use blob::BlobDiff;
 pub use myers::MyersDiff;
 pub use region::RegionDiff;
 
-pub trait Diff {
+use crate::object::BytesSerDe;
+
+pub trait Diff: BytesSerDe {
     fn from_compare(old: &[u8], new: &[u8]) -> Self
     where
         Self: Sized;
