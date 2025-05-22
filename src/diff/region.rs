@@ -1,7 +1,7 @@
 use super::{Diff, blob::BlobDiff, myers::MyersDiff};
 use crate::{
     mca::{ChunkWithTimestamp, CompressionType, LazyChunk, MCABuilder, MCAReader},
-    object::{BytesSerDe, BytesSerDeError},
+    object::{Serde, SerdeError},
     util::create_chunk_ixz_iter,
 };
 use fastnbt::Value;
@@ -209,12 +209,12 @@ impl Diff for NbtDiff {
         fastnbt::to_bytes(&Value::Compound(others)).unwrap()
     }
 }
-impl BytesSerDe for NbtDiff {
-    fn serialize(&self) -> Result<Vec<u8>, BytesSerDeError> {
+impl Serde for NbtDiff {
+    fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
         todo!()
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, BytesSerDeError>
+    fn deserialize(bytes: &[u8]) -> Result<Self, SerdeError>
     where
         Self: Sized,
     {
@@ -378,12 +378,12 @@ impl Diff for RegionDiff {
         builder.to_bytes(CompressionType::Zlib)
     }
 }
-impl BytesSerDe for RegionDiff {
-    fn serialize(&self) -> Result<Vec<u8>, BytesSerDeError> {
+impl Serde for RegionDiff {
+    fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
         todo!()
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, BytesSerDeError>
+    fn deserialize(bytes: &[u8]) -> Result<Self, SerdeError>
     where
         Self: Sized,
     {
