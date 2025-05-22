@@ -58,6 +58,25 @@ impl Serde for BlobDiff {
             .map_err(|e| SerdeError::from(e))
     }
 }
+
+impl BlobDiff {
+    pub fn new() -> Self {
+        Self::from_compare(&[], &[])
+    }
+    pub fn get_old_text(&self) -> &[u8] {
+        &self.old_text
+    }
+    pub fn get_new_text(&self) -> &[u8] {
+        &self.new_text
+    }
+    pub fn is_creation(&self) -> bool {
+        self.old_text.len() == 0
+    }
+    pub fn is_deletion(&self) -> bool {
+        self.new_text.len() == 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

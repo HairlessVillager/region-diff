@@ -1,5 +1,9 @@
 use crate::{
-    diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
+    diff::{
+        Diff,
+        base::{BlobDiff, MyersDiff},
+        nbt::ChunkDiff,
+    },
     mca::{ChunkWithTimestamp, CompressionType, LazyChunk, MCABuilder, MCAReader},
     object::{Serde, SerdeError},
     util::create_chunk_ixz_iter,
@@ -9,7 +13,7 @@ use crate::{
 enum ChunkWithTimestampDiff {
     NotExists,
     Minor(i32, ChunkDiff),
-    Major(u32, BlobDiff),
+    Major(i32, BlobDiff),
 }
 #[derive(Debug)]
 pub struct RegionDiff {
@@ -33,12 +37,13 @@ impl Diff for RegionDiff {
                 (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
                 (LazyChunk::NotExists, LazyChunk::NotExists) => ChunkWithTimestampDiff::NotExists,
                 (LazyChunk::NotExists, LazyChunk::Some(chunk)) => ChunkWithTimestampDiff::Major(
-                    chunk.timestamp,
+                    chunk.timestamp as i32,
                     BlobDiff::from_compare(&[], &chunk.nbt),
                 ),
-                (LazyChunk::Some(chunk), LazyChunk::NotExists) => {
-                    ChunkWithTimestampDiff::Major(0, BlobDiff::from_compare(&chunk.nbt, &[]))
-                }
+                (LazyChunk::Some(chunk), LazyChunk::NotExists) => ChunkWithTimestampDiff::Major(
+                    -(chunk.timestamp as i32),
+                    BlobDiff::from_compare(&chunk.nbt, &[]),
+                ),
                 (LazyChunk::Some(chunk_old), LazyChunk::Some(chunk_new)) => {
                     ChunkWithTimestampDiff::Minor(
                         chunk_new.timestamp as i32 - chunk_old.timestamp as i32,
@@ -55,7 +60,73 @@ impl Diff for RegionDiff {
     where
         Self: Sized,
     {
-        todo!()
+        let mut squashed_chunks = [const { ChunkWithTimestampDiff::NotExists }; 1024];
+        for (i, _, _) in create_chunk_ixz_iter() {
+            let chunk_diff_base = &base.chunks[i];
+            let chunk_diff_squashing = &squashing.chunks[i];
+            squashed_chunks[i] = match (chunk_diff_base, chunk_diff_squashing) {
+                (ChunkWithTimestampDiff::NotExists, ChunkWithTimestampDiff::NotExists) => {
+                    ChunkWithTimestampDiff::NotExists
+                }
+                (
+                    ChunkWithTimestampDiff::NotExists,
+                    ChunkWithTimestampDiff::Major(ts_diff, blob_diff),
+                ) => ChunkWithTimestampDiff::Major(
+                    *ts_diff,
+                    BlobDiff::from_compare(&[], blob_diff.get_new_text()),
+                ),
+                (
+                    ChunkWithTimestampDiff::Minor(base_ts_diff, base_chunk_diff),
+                    ChunkWithTimestampDiff::Minor(squashing_ts_diff, squashing_chunk_diff),
+                ) => ChunkWithTimestampDiff::Minor(
+                    *base_ts_diff + *squashing_ts_diff,
+                    ChunkDiff::from_squash(base_chunk_diff, squashing_chunk_diff),
+                ),
+                (
+                    ChunkWithTimestampDiff::Minor(base_ts_diff, base_chunk_diff),
+                    ChunkWithTimestampDiff::Major(squashing_ts_diff, squashing_chunk_diff),
+                ) => ChunkWithTimestampDiff::Major(
+                    *base_ts_diff + *squashing_ts_diff,
+                    BlobDiff::from_compare(
+                        &base_chunk_diff.revert(squashing_chunk_diff.get_old_text()),
+                        squashing_chunk_diff.get_new_text(),
+                    ),
+                ),
+                (
+                    ChunkWithTimestampDiff::Major(ts_diff, blob_diff),
+                    ChunkWithTimestampDiff::NotExists,
+                ) => ChunkWithTimestampDiff::Major(
+                    -*ts_diff,
+                    BlobDiff::from_compare(blob_diff.get_old_text(), &[]),
+                ),
+                (
+                    ChunkWithTimestampDiff::Major(base_ts_diff, base_chunk_diff),
+                    ChunkWithTimestampDiff::Minor(squashing_ts_diff, squashing_chunk_diff),
+                ) => ChunkWithTimestampDiff::Major(
+                    *base_ts_diff + *squashing_ts_diff,
+                    BlobDiff::from_compare(
+                        base_chunk_diff.get_old_text(),
+                        &squashing_chunk_diff.patch(base_chunk_diff.get_new_text()),
+                    ),
+                ),
+                (
+                    ChunkWithTimestampDiff::Major(base_ts_diff, base_chunk_diff),
+                    ChunkWithTimestampDiff::Major(squashing_ts_diff, squashing_chunk_diff),
+                ) => ChunkWithTimestampDiff::Major(
+                    *base_ts_diff + *squashing_ts_diff,
+                    BlobDiff::from_squash(base_chunk_diff, squashing_chunk_diff),
+                ),
+                (ChunkWithTimestampDiff::NotExists, ChunkWithTimestampDiff::Minor(_, _))
+                | (ChunkWithTimestampDiff::Minor(_, _), ChunkWithTimestampDiff::NotExists) => {
+                    panic!(
+                        "one of the diff not exists, with another is minor diff, which is impossible"
+                    )
+                }
+            };
+        }
+        Self {
+            chunks: squashed_chunks,
+        }
     }
 
     fn patch(&self, old: &[u8]) -> Vec<u8> {
@@ -75,7 +146,7 @@ impl Diff for RegionDiff {
                     LazyChunk::NotExists,
                     ChunkWithTimestampDiff::Major(timestamp_diff, chunk_diff),
                 ) => Some(ChunkWithTimestamp {
-                    timestamp: *timestamp_diff,
+                    timestamp: *timestamp_diff as u32,
                     nbt: chunk_diff.patch(&[]),
                 }),
                 (LazyChunk::NotExists, ChunkWithTimestampDiff::Minor(_, _)) => panic!(
@@ -127,7 +198,7 @@ impl Diff for RegionDiff {
                     LazyChunk::NotExists,
                     ChunkWithTimestampDiff::Major(timestamp_diff, chunk_diff),
                 ) => Some(ChunkWithTimestamp {
-                    timestamp: *timestamp_diff,
+                    timestamp: *timestamp_diff as u32,
                     nbt: chunk_diff.revert(&[]),
                 }),
                 (LazyChunk::NotExists, ChunkWithTimestampDiff::Minor(_, _)) => panic!(
@@ -252,4 +323,5 @@ mod tests {
             assert_mca_eq(&old, &reverted_new);
         }
     }
+    // TODO: test_in_continuous_data & test_in_noncontinuous_data
 }
