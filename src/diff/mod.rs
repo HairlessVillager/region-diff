@@ -1,9 +1,6 @@
-pub mod blob;
-pub mod myers;
-pub mod region;
-pub use blob::BlobDiff;
-pub use myers::MyersDiff;
-pub use region::RegionDiff;
+pub mod base;
+pub mod file;
+pub mod nbt;
 
 use crate::object::Serde;
 

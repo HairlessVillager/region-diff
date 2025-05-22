@@ -1,9 +1,7 @@
-use bincode::{Decode, Encode, decode_from_slice, encode_to_vec, error::DecodeError};
-use fastnbt::to_bytes;
-use std::io::{Cursor, Read};
+use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 
-use super::Diff;
 use crate::{
+    diff::Diff,
     object::{Serde, SerdeError},
     util::create_bincode_config,
 };
@@ -53,7 +51,7 @@ impl Serde for BlobDiff {
     where
         Self: Sized,
     {
-        let result: Result<(BlobDiff, usize), DecodeError> =
+        let result: Result<(BlobDiff, usize), _> =
             decode_from_slice(bytes, create_bincode_config());
         result
             .map(|(diff, _)| diff)

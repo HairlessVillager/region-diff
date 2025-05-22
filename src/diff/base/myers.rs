@@ -1,13 +1,12 @@
-use bincode::{Decode, Encode, decode_from_slice, encode_to_vec, error::DecodeError};
+use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use similar::{Algorithm, DiffOp, capture_diff_slices};
 use std::io::{Cursor, Read, Seek};
 
 use crate::{
+    diff::Diff,
     object::{Serde, SerdeError},
     util::create_bincode_config,
 };
-
-use super::Diff;
 
 #[derive(Debug, Encode, Decode, PartialEq)]
 pub struct MyersDiff {
@@ -17,7 +16,7 @@ pub struct MyersDiff {
 }
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
-pub struct Replace {
+struct Replace {
     old_idx: usize,
     old_len: usize,
     new_idx: usize,
@@ -173,7 +172,7 @@ impl Serde for MyersDiff {
     where
         Self: Sized,
     {
-        let result: Result<(MyersDiff, usize), DecodeError> =
+        let result: Result<(MyersDiff, usize), _> =
             decode_from_slice(bytes, create_bincode_config());
         result
             .map(|(diff, _)| diff)
