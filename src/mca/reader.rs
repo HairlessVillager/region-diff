@@ -1,46 +1,17 @@
+use super::SECTOR_SIZE;
+
+use super::{ChunkWithTimestamp, HeaderEntry};
 use std::{
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom},
 };
 
 #[derive(Debug, Clone)]
-struct HeaderEntry {
-    idx: usize,
-    sector_offset: u32,
-    sector_count: u8,
-    timestamp: u32,
-}
-impl HeaderEntry {
-    fn is_available(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        if self.sector_count == 0 && self.sector_offset == 0 {
-            Ok(false)
-        } else if self.sector_offset < 2 {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Sector {} overlaps with header", self.idx),
-            )))
-        } else if self.sector_count == 0 {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Sector {} size has to be > 0", self.idx),
-            )))
-        } else {
-            Ok(true)
-        }
-    }
-}
-#[derive(Debug, Clone)]
 pub enum LazyChunk {
     Unloaded,
     NotExists,
     Some(ChunkWithTimestamp),
 }
-#[derive(Debug, Clone)]
-pub struct ChunkWithTimestamp {
-    pub timestamp: u32,
-    pub nbt: Vec<u8>,
-}
-
 pub struct MCAReader<R: Read + Seek> {
     mca_reader: R,
     header: [HeaderEntry; 1024],
@@ -59,10 +30,11 @@ impl<R: Read + Seek> MCAReader<R> {
                 chunks[header_entry.idx] = match header_entry.sector_offset {
                     0 => LazyChunk::NotExists,
                     1..=u32::MAX => {
-                        let offset = header_entry.sector_offset * 4096;
-                        let _ = reader.seek(std::io::SeekFrom::Start(offset as u64));
+                        let offset = (header_entry.sector_offset as u64) * (SECTOR_SIZE as u64);
+                        let _ = reader.seek(std::io::SeekFrom::Start(offset));
 
-                        let mut sector_buf = vec![0u8; header_entry.sector_count as usize * 4096];
+                        let mut sector_buf =
+                            vec![0u8; header_entry.sector_count as usize * SECTOR_SIZE];
                         reader.read_exact(&mut sector_buf).map_err(|e| {
                             Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
@@ -106,9 +78,9 @@ impl<R: Read + Seek> MCAReader<R> {
             return Ok(None);
         }
 
-        let mut sector_buf = vec![0u8; header.sector_count as usize * 4096];
-        self.mca_reader
-            .seek(SeekFrom::Start((header.sector_offset * 4096) as u64))?;
+        let mut sector_buf = vec![0u8; header.sector_count as usize * SECTOR_SIZE];
+        let offset = (header.sector_offset as u64) * (SECTOR_SIZE as u64);
+        self.mca_reader.seek(SeekFrom::Start(offset))?;
         self.mca_reader.read_exact(&mut sector_buf)?;
 
         let chunk = ChunkWithTimestamp {
@@ -139,8 +111,8 @@ impl MCAReader<BufReader<File>> {
         Self::from_reader(reader, lazy)
     }
 }
-impl<'a> MCAReader<Cursor<&'a Vec<u8>>> {
-    pub fn from_bytes(bytes: &'a Vec<u8>) -> Result<Self, Box<dyn std::error::Error>> {
+impl<'a> MCAReader<Cursor<&'a [u8]>> {
+    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Box<dyn std::error::Error>> {
         let reader = Cursor::new(bytes);
         Self::from_reader(reader, false)
     }
@@ -223,6 +195,8 @@ fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Erro
 
 #[cfg(test)]
 mod tests {
+    use crate::util::create_chunk_ixz_iter;
+
     use super::*;
     use std::io::Write;
 
@@ -230,7 +204,7 @@ mod tests {
         let mut buffer = Vec::new();
         let mut file = Cursor::new(&mut buffer);
 
-        let mut header = vec![0u8; 8192];
+        let mut header = vec![0u8; SECTOR_SIZE * 2];
 
         // set header for first chunk
         header[0] = 0;
@@ -259,7 +233,7 @@ mod tests {
         file.write_all(&compressed)?; // write compressed data
 
         // padding to 4096 bytes (one sector)
-        let padding = vec![0u8; 4096 - (compressed.len() + 4)];
+        let padding = vec![0u8; SECTOR_SIZE - (compressed.len() + 4)];
         file.write_all(&padding)?;
 
         Ok(buffer)
@@ -317,10 +291,8 @@ mod tests {
         ];
         for path in paths {
             let mut reader = MCAReader::from_file(path, false).unwrap();
-            for x in 0..32 {
-                for z in 0..32 {
-                    let _ = reader.get_chunk(x, z).unwrap();
-                }
+            for (_, x, z) in create_chunk_ixz_iter() {
+                let _ = reader.get_chunk(x, z).unwrap();
             }
         }
     }
