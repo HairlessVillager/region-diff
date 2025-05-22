@@ -12,7 +12,7 @@ impl BytesSerDeError {
     }
 }
 pub trait BytesSerDe {
-    fn serialize(&self) -> Result<Vec<u8>, ()>;
+    fn serialize(&self) -> Result<Vec<u8>, BytesSerDeError>;
     fn deserialize(bytes: &[u8]) -> Result<Self, BytesSerDeError>
     where
         Self: Sized;

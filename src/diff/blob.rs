@@ -41,7 +41,7 @@ impl Diff for BlobDiff {
 }
 
 impl BytesSerDe for BlobDiff {
-    fn serialize(&self) -> Result<Vec<u8>, ()> {
+    fn serialize(&self) -> Result<Vec<u8>, BytesSerDeError> {
         let capacity_bytes = 32 + self.old_text.len() + self.new_text.len();
         let mut buffer: Vec<u8> = Vec::with_capacity(capacity_bytes);
 

@@ -210,7 +210,7 @@ impl Diff for NbtDiff {
     }
 }
 impl BytesSerDe for NbtDiff {
-    fn serialize(&self) -> Result<Vec<u8>, ()> {
+    fn serialize(&self) -> Result<Vec<u8>, BytesSerDeError> {
         todo!()
     }
 
@@ -379,7 +379,7 @@ impl Diff for RegionDiff {
     }
 }
 impl BytesSerDe for RegionDiff {
-    fn serialize(&self) -> Result<Vec<u8>, ()> {
+    fn serialize(&self) -> Result<Vec<u8>, BytesSerDeError> {
         todo!()
     }
 
