@@ -221,6 +221,25 @@ impl Diff for RegionDiff {
     where
         Self: Sized,
     {
+        let reader_old = MCAReader::from_bytes(old).unwrap();
+        let reader_new = MCAReader::from_bytes(new).unwrap();
+        let timestamps = [const { TimestampDiff::Major(0)}; 1024];
+        let chunks = [const { ChunkDiff::NoDiff }; 1024];
+        for x in 0..32 {
+            for z in 0..32 {
+                let i = x + 32 * z;
+                let old = reader_old.get_chunk_lazily(x, z);
+                let new = reader_old.get_chunk_lazily(x, z);
+                let (timestamp, chunk) = match (old, new) {
+                    (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
+                    (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
+                    (LazyChunk::NotExists, LazyChunk::NotExists) => (TimestampDiff::Major(0), ChunkDiff::NoDiff),
+                    (LazyChunk::NotExists, LazyChunk::Some(chunk)) => (TimestampDiff::Major(chunk.timestamp), ChunkDiff::Major(BlobDiff::from_compare(&[], &chunk.nbt))),
+                    (LazyChunk::Some(chunk), LazyChunk::NotExists) => (TimestampDiff::Major(0), ChunkDiff::Major(BlobDiff::from_compare(&chunk.nbt, &[]))),
+                    (LazyChunk::Some(chunk_old), LazyChunk::Some(chunk_new)) => (TimestampDiff::Minor(chunk_new.timestamp as i32 - chunk_old.timestamp as i32), ChunkDiff::Minor(NbtDiff::from_compare(&chunk_old.nbt, &chunk_new.nbt)))
+                }
+            }
+        }
         todo!()
     }
 
