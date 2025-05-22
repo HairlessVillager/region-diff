@@ -6,9 +6,9 @@ use std::{
 #[derive(Debug, Clone)]
 struct HeaderEntry {
     idx: usize,
-    sector_offset: u64,
-    sector_count: u64,
-    timestamp: u64,
+    sector_offset: u32,
+    sector_count: u8,
+    timestamp: u32,
 }
 impl HeaderEntry {
     fn is_available(&self) -> Result<bool, Box<dyn std::error::Error>> {
@@ -37,7 +37,7 @@ pub enum LazyChunk {
 }
 #[derive(Debug, Clone)]
 pub struct ChunkWithTimestamp {
-    pub timestamp: i64,
+    pub timestamp: u32,
     pub nbt: Vec<u8>,
 }
 
@@ -58,11 +58,11 @@ impl<R: Read + Seek> MCAReader<R> {
             for header_entry in header_refs {
                 chunks[header_entry.idx] = match header_entry.sector_offset {
                     0 => LazyChunk::NotExists,
-                    1..=u64::MAX => {
+                    1..=u32::MAX => {
                         let offset = header_entry.sector_offset * 4096;
-                        let _ = reader.seek(std::io::SeekFrom::Start(offset));
+                        let _ = reader.seek(std::io::SeekFrom::Start(offset as u64));
 
-                        let mut sector_buf = vec![0u8; (header_entry.sector_count * 4096) as usize];
+                        let mut sector_buf = vec![0u8; header_entry.sector_count as usize * 4096];
                         reader.read_exact(&mut sector_buf).map_err(|e| {
                             Box::new(std::io::Error::new(
                                 std::io::ErrorKind::Other,
@@ -73,7 +73,7 @@ impl<R: Read + Seek> MCAReader<R> {
                             ))
                         })?;
                         LazyChunk::Some(ChunkWithTimestamp {
-                            timestamp: header_entry.timestamp as i64,
+                            timestamp: header_entry.timestamp,
                             nbt: read_chunk_nbt(&sector_buf)?,
                         })
                     }
@@ -89,10 +89,10 @@ impl<R: Read + Seek> MCAReader<R> {
 
     pub fn get_chunk(
         &mut self,
-        x: i32,
-        z: i32,
+        x: usize,
+        z: usize,
     ) -> Result<Option<&ChunkWithTimestamp>, Box<dyn std::error::Error>> {
-        let idx = (x + 32 * z) as usize;
+        let idx = x + 32 * z;
 
         if let LazyChunk::Some(ref chunk) = self.chunks[idx] {
             return Ok(Some(chunk));
@@ -106,13 +106,13 @@ impl<R: Read + Seek> MCAReader<R> {
             return Ok(None);
         }
 
-        let mut sector_buf = vec![0u8; (header.sector_count * 4096) as usize];
+        let mut sector_buf = vec![0u8; header.sector_count as usize * 4096];
         self.mca_reader
-            .seek(SeekFrom::Start(header.sector_offset * 4096))?;
+            .seek(SeekFrom::Start((header.sector_offset * 4096) as u64))?;
         self.mca_reader.read_exact(&mut sector_buf)?;
 
         let chunk = ChunkWithTimestamp {
-            timestamp: header.timestamp as i64,
+            timestamp: header.timestamp,
             nbt: read_chunk_nbt(&sector_buf)?,
         };
 
@@ -125,6 +125,10 @@ impl<R: Read + Seek> MCAReader<R> {
                 "Failed to load chunk",
             ))),
         }
+    }
+    pub fn get_chunk_lazily(&self, x: usize, z: usize) -> &LazyChunk {
+        let idx = x + 32 * z;
+        &self.chunks[idx]
     }
 }
 
@@ -155,8 +159,8 @@ fn read_header<R: Read + Seek>(
     for (idx, _offset) in (0x0000..0x0fff).step_by(4).enumerate() {
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf)?;
-        let sector_offset = u32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as u64;
-        let sector_count = buf[3] as u64;
+        let sector_offset = u32::from_be_bytes([0, buf[0], buf[1], buf[2]]);
+        let sector_count = buf[3];
         headers[idx] = HeaderEntry {
             idx,
             sector_offset,
@@ -169,7 +173,7 @@ fn read_header<R: Read + Seek>(
     for (idx, _offset) in (0x1000..0x1fff).step_by(4).enumerate() {
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf)?;
-        let timestamp = i32::from_be_bytes(buf) as u64;
+        let timestamp = u32::from_be_bytes(buf);
         headers[idx].timestamp = timestamp;
     }
 

@@ -243,7 +243,10 @@ impl Diff for RegionDiff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mca::MCAReader;
+    use crate::{
+        mca::{LazyChunk, MCAReader},
+        util::sort_value,
+    };
     use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
 
     fn get_test_chunk(path: &str, seed: u64) -> impl Iterator<Item = Vec<u8>> {
@@ -257,14 +260,30 @@ mod tests {
         }
         let mut rng = StdRng::seed_from_u64(seed);
         xzs.shuffle(&mut rng);
-        xzs.into_iter().map(move |(x, z)| {
-            reader
-                .get_chunk(x as i32, z as i32)
-                .unwrap()
-                .unwrap()
-                .nbt
-                .clone()
-        })
+        xzs.into_iter()
+            .map(move |(x, z)| reader.get_chunk(x, z).unwrap().unwrap().nbt.clone())
+    }
+    #[test]
+    fn test_mca_timestamp_nbt() {
+        let reader_old = MCAReader::from_file("./resources/mca/r.1.2.20250511.mca", false).unwrap();
+        let reader_new = MCAReader::from_file("./resources/mca/r.1.2.20250512.mca", false).unwrap();
+        for x in 0..32 {
+            for z in 0..32 {
+                let (timestamp_old, nbt_old) = match reader_old.get_chunk_lazily(x, z) {
+                    LazyChunk::Some(chunk) => (chunk.timestamp, sort_value(&chunk.nbt).unwrap()),
+                    _ => panic!("chunk should loaded"),
+                };
+                let (timestamp_new, nbt_new) = match reader_new.get_chunk_lazily(x, z) {
+                    LazyChunk::Some(chunk) => (chunk.timestamp, sort_value(&chunk.nbt).unwrap()),
+                    _ => panic!("chunk should loaded"),
+                };
+                if timestamp_old == timestamp_new {
+                    assert_eq!(nbt_old, nbt_new);
+                } else {
+                    assert_ne!(nbt_old, nbt_new);
+                }
+            }
+        }
     }
     mod test_nbt_diff {
         use super::*;

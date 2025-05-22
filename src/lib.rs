@@ -1,6 +1,7 @@
 pub mod diff;
 pub mod mca;
 pub mod object;
+pub mod util;
 
 #[cfg(test)]
 mod tests {
