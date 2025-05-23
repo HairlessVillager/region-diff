@@ -228,19 +228,18 @@ impl Serde for ChunkDiff {
 }
 #[cfg(test)]
 mod tests {
-    use rand::{SeedableRng, rngs::StdRng, seq::SliceRandom};
+    use rand::prelude::*;
 
     use crate::{mca::MCAReader, util::create_chunk_ixz_iter};
 
     use super::*;
-    fn get_test_chunk(path: &str, seed: u64) -> impl Iterator<Item = Vec<u8>> {
+    fn get_test_chunk(path: &str, rng: &mut StdRng) -> impl Iterator<Item = Vec<u8>> {
         let mut reader = MCAReader::from_file(path, false).unwrap();
         let mut xzs = [(0, 0); 1024];
         for (i, x, z) in create_chunk_ixz_iter() {
             xzs[i] = (x, z);
         }
-        let mut rng = StdRng::seed_from_u64(seed);
-        xzs.shuffle(&mut rng);
+        xzs.shuffle(rng);
         xzs.into_iter()
             .map(move |(x, z)| reader.get_chunk(x, z).unwrap().unwrap().nbt.clone())
     }
@@ -250,8 +249,10 @@ mod tests {
         use super::*;
         #[test]
         fn test_diff_patch_revert() -> () {
-            let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", 114514);
-            let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", 114514);
+            let mut rng_old = StdRng::seed_from_u64(114514);
+            let mut rng_new = rng_old.clone();
+            let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_old);
+            let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", &mut rng_new);
             for _ in 0..100 {
                 let old = old_iter.next().unwrap(); // NOTE: root compound has unsorted key, cannot assert_eq directly
                 let new = new_iter.next().unwrap(); // NOTE: root compound has unsorted key, cannot assert_eq directly
@@ -271,18 +272,23 @@ mod tests {
         }
         #[test]
         fn test_diff_squash() -> () {
-            let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", 114514);
-            let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", 114514);
-            let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", 114514);
+            let mut rng_v0 = StdRng::seed_from_u64(114514);
+            let mut rng_v1 = rng_v0.clone();
+            rng_v1.next_u32();
+            let mut rng_v2 = rng_v1.clone();
+            rng_v2.next_u32();
+            let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_v0);
+            let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
+            let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
             for _ in 0..100 {
                 let v0 = v0_iter.next().unwrap();
                 let v1 = v1_iter.next().unwrap();
                 let v2 = v2_iter.next().unwrap();
                 let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
                 let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
-                let merged_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
-                let patched_v0 = merged_diff.patch(&v0);
-                let reverted_v2 = merged_diff.revert(&v2);
+                let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
+                let patched_v0 = squashed_diff.patch(&v0);
+                let reverted_v2 = squashed_diff.revert(&v2);
 
                 assert_eq!(
                     fastnbt::from_bytes::<Value>(&v2),
@@ -301,8 +307,11 @@ mod tests {
         use super::*;
         #[test]
         fn test_diff_patch_revert() -> () {
-            let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", 114514);
-            let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", 1919810);
+            let mut rng_old = StdRng::seed_from_u64(114514);
+            let mut rng_new = rng_old.clone();
+            rng_new.next_u32();
+            let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_old);
+            let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", &mut rng_new);
             for _ in 0..3 {
                 let old = old_iter.next().unwrap(); // NOTE: root compound has unsorted key, cannot assert_eq directly
                 let new = new_iter.next().unwrap(); // NOTE: root compound has unsorted key, cannot assert_eq directly
@@ -322,18 +331,23 @@ mod tests {
         }
         #[test]
         fn test_diff_squash() -> () {
-            let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", 114514);
-            let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", 1919810);
-            let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", 19260817);
+            let mut rng_v0 = StdRng::seed_from_u64(114514);
+            let mut rng_v1 = rng_v0.clone();
+            rng_v1.next_u32();
+            let mut rng_v2 = rng_v1.clone();
+            rng_v2.next_u32();
+            let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_v0);
+            let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
+            let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
             for _ in 0..3 {
                 let v0 = v0_iter.next().unwrap();
                 let v1 = v1_iter.next().unwrap();
                 let v2 = v2_iter.next().unwrap();
                 let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
                 let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
-                let merged_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
-                let patched_v0 = merged_diff.patch(&v0);
-                let reverted_v2 = merged_diff.revert(&v2);
+                let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
+                let patched_v0 = squashed_diff.patch(&v0);
+                let reverted_v2 = squashed_diff.revert(&v2);
 
                 assert_eq!(
                     fastnbt::from_bytes::<Value>(&v2),

@@ -416,9 +416,9 @@ mod tests {
             let v2 = v2_iter.next().unwrap();
             let diff_v01 = MyersDiff::from_compare(&v0, &v1);
             let diff_v12 = MyersDiff::from_compare(&v1, &v2);
-            let merged_diff = MyersDiff::from_squash(&diff_v01, &diff_v12);
-            let patched_v0 = merged_diff.patch(&v0);
-            let reverted_v2 = merged_diff.revert(&v2);
+            let squashed_diff = MyersDiff::from_squash(&diff_v01, &diff_v12);
+            let patched_v0 = squashed_diff.patch(&v0);
+            let reverted_v2 = squashed_diff.revert(&v2);
             assert_eq!(patched_v0, v2, "v0: {:?}; v1{:?}; v2: {:?}", v0, v1, v2);
             assert_eq!(reverted_v2, v0, "v0: {:?}; v1{:?}; v2: {:?}", v0, v1, v2);
         }

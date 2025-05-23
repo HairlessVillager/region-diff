@@ -1,4 +1,4 @@
 mod mca;
 mod mcc;
 
-pub use mca::RegionDiff;
+pub use mca::McaDiff;

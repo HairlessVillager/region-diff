@@ -11,41 +11,55 @@ use crate::{
 
 #[derive(Debug)]
 enum ChunkWithTimestampDiff {
-    NotExists,
-    Minor(i32, ChunkDiff),
-    Major(i32, BlobDiff),
+    BothNotExist,
+    Create(i32, BlobDiff),
+    Delete(i32, BlobDiff),
+    Update(i32, ChunkDiff),
+}
+impl ChunkWithTimestampDiff {
+    pub fn get_description(&self) -> String {
+        match self {
+            ChunkWithTimestampDiff::BothNotExist => {
+                "report both old chunk and new chunk not exist".to_string()
+            }
+            ChunkWithTimestampDiff::Create(_, _) => "is a create diff".to_string(),
+            ChunkWithTimestampDiff::Delete(_, _) => "is a delete diff".to_string(),
+            ChunkWithTimestampDiff::Update(_, _) => "is a update diff".to_string(),
+        }
+    }
 }
 #[derive(Debug)]
-pub struct RegionDiff {
+pub struct McaDiff {
     chunks: [ChunkWithTimestampDiff; 1024],
 }
 
-// suitable for region/*.mca
-impl Diff for RegionDiff {
+impl Diff for McaDiff {
     fn from_compare(old: &[u8], new: &[u8]) -> Self
     where
         Self: Sized,
     {
         let reader_old = MCAReader::from_bytes(old).unwrap();
         let reader_new = MCAReader::from_bytes(new).unwrap();
-        let mut chunks = [const { ChunkWithTimestampDiff::NotExists }; 1024];
+        let mut chunks = [const { ChunkWithTimestampDiff::BothNotExist }; 1024];
         for (i, x, z) in create_chunk_ixz_iter() {
             let old = reader_old.get_chunk_lazily(x, z);
             let new = reader_new.get_chunk_lazily(x, z);
             let chunk = match (old, new) {
                 (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
                 (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
-                (LazyChunk::NotExists, LazyChunk::NotExists) => ChunkWithTimestampDiff::NotExists,
-                (LazyChunk::NotExists, LazyChunk::Some(chunk)) => ChunkWithTimestampDiff::Major(
-                    chunk.timestamp as i32,
+                (LazyChunk::NotExists, LazyChunk::NotExists) => {
+                    ChunkWithTimestampDiff::BothNotExist
+                }
+                (LazyChunk::NotExists, LazyChunk::Some(chunk)) => ChunkWithTimestampDiff::Create(
+                    chunk.timestamp as i32 - 0,
                     BlobDiff::from_compare(&[], &chunk.nbt),
                 ),
-                (LazyChunk::Some(chunk), LazyChunk::NotExists) => ChunkWithTimestampDiff::Major(
-                    -(chunk.timestamp as i32),
+                (LazyChunk::Some(chunk), LazyChunk::NotExists) => ChunkWithTimestampDiff::Delete(
+                    0 - chunk.timestamp as i32,
                     BlobDiff::from_compare(&chunk.nbt, &[]),
                 ),
                 (LazyChunk::Some(chunk_old), LazyChunk::Some(chunk_new)) => {
-                    ChunkWithTimestampDiff::Minor(
+                    ChunkWithTimestampDiff::Update(
                         chunk_new.timestamp as i32 - chunk_old.timestamp as i32,
                         ChunkDiff::from_compare(&chunk_old.nbt, &chunk_new.nbt),
                     )
@@ -60,49 +74,65 @@ impl Diff for RegionDiff {
     where
         Self: Sized,
     {
-        let mut squashed_chunks = [const { ChunkWithTimestampDiff::NotExists }; 1024];
+        let mut squashed_chunks = [const { ChunkWithTimestampDiff::BothNotExist }; 1024];
         for (i, _, _) in create_chunk_ixz_iter() {
             let chunk_diff_base = &base.chunks[i];
             let chunk_diff_squashing = &squashing.chunks[i];
             squashed_chunks[i] = match (chunk_diff_base, chunk_diff_squashing) {
-                (ChunkWithTimestampDiff::NotExists, ChunkWithTimestampDiff::NotExists) => {
-                    ChunkWithTimestampDiff::NotExists
+                // Create then Create or Delete then Delete
+                (ChunkWithTimestampDiff::Create(_, _), ChunkWithTimestampDiff::Create(_, _)) => {
+                    panic!("both diff are create diff, which is impossible")
                 }
+                (ChunkWithTimestampDiff::Delete(_, _), ChunkWithTimestampDiff::Delete(_, _)) => {
+                    panic!("both diff are delete diff, which is impossible")
+                }
+
+                // BothNotExists and BothNotExists
+                (ChunkWithTimestampDiff::BothNotExist, ChunkWithTimestampDiff::BothNotExist) => {
+                    ChunkWithTimestampDiff::BothNotExist
+                }
+
+                // Create then Delete
+                (ChunkWithTimestampDiff::Create(_, _), ChunkWithTimestampDiff::Delete(_, _)) => {
+                    ChunkWithTimestampDiff::BothNotExist
+                }
+
+                // Delete then Create
                 (
-                    ChunkWithTimestampDiff::NotExists,
-                    ChunkWithTimestampDiff::Major(ts_diff, blob_diff),
-                ) => ChunkWithTimestampDiff::Major(
-                    *ts_diff,
-                    BlobDiff::from_compare(&[], blob_diff.get_new_text()),
-                ),
-                (
-                    ChunkWithTimestampDiff::Minor(base_ts_diff, base_chunk_diff),
-                    ChunkWithTimestampDiff::Minor(squashing_ts_diff, squashing_chunk_diff),
-                ) => ChunkWithTimestampDiff::Minor(
+                    ChunkWithTimestampDiff::Delete(base_ts_diff, base_chunk_diff),
+                    ChunkWithTimestampDiff::Create(squashing_ts_diff, squashing_chunk_diff),
+                ) => ChunkWithTimestampDiff::Update(
                     *base_ts_diff + *squashing_ts_diff,
-                    ChunkDiff::from_squash(base_chunk_diff, squashing_chunk_diff),
-                ),
-                (
-                    ChunkWithTimestampDiff::Minor(base_ts_diff, base_chunk_diff),
-                    ChunkWithTimestampDiff::Major(squashing_ts_diff, squashing_chunk_diff),
-                ) => ChunkWithTimestampDiff::Major(
-                    *base_ts_diff + *squashing_ts_diff,
-                    BlobDiff::from_compare(
-                        &base_chunk_diff.revert(squashing_chunk_diff.get_old_text()),
+                    ChunkDiff::from_compare(
+                        base_chunk_diff.get_old_text(),
                         squashing_chunk_diff.get_new_text(),
                     ),
                 ),
+
+                // BothNotExists then Create or Delete then BothNotExists
                 (
-                    ChunkWithTimestampDiff::Major(ts_diff, blob_diff),
-                    ChunkWithTimestampDiff::NotExists,
-                ) => ChunkWithTimestampDiff::Major(
-                    -*ts_diff,
-                    BlobDiff::from_compare(blob_diff.get_old_text(), &[]),
+                    ChunkWithTimestampDiff::BothNotExist,
+                    ChunkWithTimestampDiff::Create(ts_diff, blob_diff),
+                ) => ChunkWithTimestampDiff::Create(*ts_diff, blob_diff.clone()),
+                (
+                    ChunkWithTimestampDiff::Delete(ts_diff, blob_diff),
+                    ChunkWithTimestampDiff::BothNotExist,
+                ) => ChunkWithTimestampDiff::Delete(*ts_diff, blob_diff.clone()),
+
+                // Update then Update
+                (
+                    ChunkWithTimestampDiff::Update(base_ts_diff, base_chunk_diff),
+                    ChunkWithTimestampDiff::Update(squashing_ts_diff, squashing_chunk_diff),
+                ) => ChunkWithTimestampDiff::Update(
+                    *base_ts_diff + *squashing_ts_diff,
+                    ChunkDiff::from_squash(base_chunk_diff, squashing_chunk_diff),
                 ),
+
+                // Create then Update or Update then Delete
                 (
-                    ChunkWithTimestampDiff::Major(base_ts_diff, base_chunk_diff),
-                    ChunkWithTimestampDiff::Minor(squashing_ts_diff, squashing_chunk_diff),
-                ) => ChunkWithTimestampDiff::Major(
+                    ChunkWithTimestampDiff::Create(base_ts_diff, base_chunk_diff),
+                    ChunkWithTimestampDiff::Update(squashing_ts_diff, squashing_chunk_diff),
+                ) => ChunkWithTimestampDiff::Create(
                     *base_ts_diff + *squashing_ts_diff,
                     BlobDiff::from_compare(
                         base_chunk_diff.get_old_text(),
@@ -110,16 +140,22 @@ impl Diff for RegionDiff {
                     ),
                 ),
                 (
-                    ChunkWithTimestampDiff::Major(base_ts_diff, base_chunk_diff),
-                    ChunkWithTimestampDiff::Major(squashing_ts_diff, squashing_chunk_diff),
-                ) => ChunkWithTimestampDiff::Major(
+                    ChunkWithTimestampDiff::Update(base_ts_diff, base_chunk_diff),
+                    ChunkWithTimestampDiff::Delete(squashing_ts_diff, squashing_chunk_diff),
+                ) => ChunkWithTimestampDiff::Delete(
                     *base_ts_diff + *squashing_ts_diff,
-                    BlobDiff::from_squash(base_chunk_diff, squashing_chunk_diff),
+                    BlobDiff::from_compare(
+                        &base_chunk_diff.revert(squashing_chunk_diff.get_old_text()),
+                        squashing_chunk_diff.get_new_text(),
+                    ),
                 ),
-                (ChunkWithTimestampDiff::NotExists, ChunkWithTimestampDiff::Minor(_, _))
-                | (ChunkWithTimestampDiff::Minor(_, _), ChunkWithTimestampDiff::NotExists) => {
+
+                // panics
+                (base_diff, squashing_diff) => {
                     panic!(
-                        "one of the diff not exists, with another is minor diff, which is impossible"
+                        "base diff {}, while squashing diff {}, which is impossible",
+                        base_diff.get_description(),
+                        squashing_diff.get_description()
                     )
                 }
             };
@@ -134,35 +170,34 @@ impl Diff for RegionDiff {
         let mut builder = MCABuilder::new();
         let mut chunks_holder = Vec::with_capacity(1024);
         for (i, x, z) in create_chunk_ixz_iter() {
-            let lazy_chunk = reader.get_chunk_lazily(x, z);
+            let old_chunk = reader.get_chunk_lazily(x, z);
             let chunk_diff = &self.chunks[i];
-            let new_chunk = match (lazy_chunk, chunk_diff) {
-                // LazyChunk::Unloaded
+            let new_chunk = match (old_chunk, chunk_diff) {
+                // LazyChunk::Unloaded is invalid
                 (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
 
-                // LazyChunk::NotExists
-                (LazyChunk::NotExists, ChunkWithTimestampDiff::NotExists) => None,
+                // LazyChunk::NotExists accepts ChunkWithTimestampDiff::{BothNotExist, Create}
+                (LazyChunk::NotExists, ChunkWithTimestampDiff::BothNotExist) => None,
                 (
                     LazyChunk::NotExists,
-                    ChunkWithTimestampDiff::Major(timestamp_diff, chunk_diff),
-                ) => Some(ChunkWithTimestamp {
-                    timestamp: *timestamp_diff as u32,
-                    nbt: chunk_diff.patch(&[]),
-                }),
-                (LazyChunk::NotExists, ChunkWithTimestampDiff::Minor(_, _)) => panic!(
-                    "old chunk not exists, but has minor diff, expected also not exists or major diff"
+                    ChunkWithTimestampDiff::Create(timestamp_diff, chunk_diff),
+                ) => {
+                    assert!(*timestamp_diff != 0);
+                    Some(ChunkWithTimestamp {
+                        timestamp: *timestamp_diff as u32,
+                        nbt: chunk_diff.patch(&[]),
+                    })
+                }
+                (LazyChunk::NotExists, diff) => panic!(
+                    "old chunk not exists, while chunk diff {}, which is impossible",
+                    diff.get_description()
                 ),
 
-                // LazyChunk::Some
-                (LazyChunk::Some(_), ChunkWithTimestampDiff::NotExists) => {
-                    panic!("old chunk exists, but diff report not exists, expected has minor diff")
-                }
-                (LazyChunk::Some(_), ChunkWithTimestampDiff::Major(_, _)) => {
-                    panic!("old chunk exists, but has major diff, expected has minor diff")
-                }
+                // LazyChunk::Some accepts ChunkWithTimestampDiff::{Delete, Update}
+                (LazyChunk::Some(_), ChunkWithTimestampDiff::Delete(_, _)) => None,
                 (
                     LazyChunk::Some(old_chunk),
-                    ChunkWithTimestampDiff::Minor(timestamp_diff, chunk_diff),
+                    ChunkWithTimestampDiff::Update(timestamp_diff, chunk_diff),
                 ) => Some(ChunkWithTimestamp {
                     timestamp: old_chunk
                         .timestamp
@@ -170,6 +205,10 @@ impl Diff for RegionDiff {
                         .expect("timestamp overflowed"),
                     nbt: chunk_diff.patch(&old_chunk.nbt),
                 }),
+                (LazyChunk::Some(_), diff) => panic!(
+                    "old chunk exists, while chunk diff {}, which is impossible",
+                    diff.get_description()
+                ),
             };
             if let Some(chunk) = new_chunk {
                 chunks_holder.push((x, z, chunk));
@@ -186,35 +225,31 @@ impl Diff for RegionDiff {
         let mut builder = MCABuilder::new();
         let mut chunks_holder = Vec::with_capacity(1024);
         for (i, x, z) in create_chunk_ixz_iter() {
-            let lazy_chunk = reader.get_chunk_lazily(x, z);
+            let new_chunk = reader.get_chunk_lazily(x, z);
             let chunk_diff = &self.chunks[i];
-            let old_chunk = match (lazy_chunk, chunk_diff) {
+            let old_chunk = match (chunk_diff, new_chunk) {
                 // LazyChunk::Unloaded
-                (LazyChunk::Unloaded, _) => panic!("new chunk is unloaded"),
+                (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
 
-                // LazyChunk::NotExists
-                (LazyChunk::NotExists, ChunkWithTimestampDiff::NotExists) => None,
+                // ChunkWithTimestampDiff::{Delete, BothNotExist} accept LazyChunk::NotExists
+                (ChunkWithTimestampDiff::BothNotExist, LazyChunk::NotExists) => None,
                 (
+                    ChunkWithTimestampDiff::Delete(timestamp_diff, chunk_diff),
                     LazyChunk::NotExists,
-                    ChunkWithTimestampDiff::Major(timestamp_diff, chunk_diff),
                 ) => Some(ChunkWithTimestamp {
-                    timestamp: *timestamp_diff as u32,
+                    timestamp: (-*timestamp_diff) as u32,
                     nbt: chunk_diff.revert(&[]),
                 }),
-                (LazyChunk::NotExists, ChunkWithTimestampDiff::Minor(_, _)) => panic!(
-                    "new chunk not exists, but has minor diff, expected also not exists or major diff"
+                (diff, LazyChunk::NotExists) => panic!(
+                    "diff {}, while new chunk not exists, which is impossible",
+                    diff.get_description()
                 ),
 
-                // LazyChunk::Some
-                (LazyChunk::Some(_), ChunkWithTimestampDiff::NotExists) => {
-                    panic!("new chunk exists, but diff report not exists, expected has minor diff")
-                }
-                (LazyChunk::Some(_), ChunkWithTimestampDiff::Major(_, _)) => {
-                    panic!("new chunk exists, but has major diff, expected has minor diff")
-                }
+                // ChunkWithTimestampDiff::{Create, Update} accepts LazyChunk::Some
+                (ChunkWithTimestampDiff::Create(_, _), LazyChunk::Some(_)) => None,
                 (
+                    ChunkWithTimestampDiff::Update(timestamp_diff, chunk_diff),
                     LazyChunk::Some(new_chunk),
-                    ChunkWithTimestampDiff::Minor(timestamp_diff, chunk_diff),
                 ) => Some(ChunkWithTimestamp {
                     timestamp: new_chunk
                         .timestamp
@@ -222,6 +257,10 @@ impl Diff for RegionDiff {
                         .expect("timestamp overflowed"),
                     nbt: chunk_diff.revert(&new_chunk.nbt),
                 }),
+                (diff, LazyChunk::Some(_)) => panic!(
+                    "diff {}, while new chunk exists, which is impossible",
+                    diff.get_description()
+                ),
             };
             if let Some(chunk) = old_chunk {
                 chunks_holder.push((x, z, chunk));
@@ -233,7 +272,7 @@ impl Diff for RegionDiff {
         builder.to_bytes(CompressionType::Zlib)
     }
 }
-impl Serde for RegionDiff {
+impl Serde for McaDiff {
     fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
         todo!()
     }
@@ -247,6 +286,9 @@ impl Serde for RegionDiff {
 }
 #[cfg(test)]
 mod tests {
+    use fastnbt::Value;
+    use rand::prelude::*;
+
     use super::*;
     use crate::{
         mca::{LazyChunk, MCAReader},
@@ -273,16 +315,11 @@ mod tests {
             }
         }
     }
-    fn build_test_mca(path: &str, chunks: usize, seed: u64) -> Vec<u8> {
-        use rand::prelude::*;
-        let mut rng = StdRng::seed_from_u64(seed);
+    fn build_test_mca(path: &str, chunks: usize, rng: &mut StdRng) -> Vec<u8> {
         let avaliable_indexes: Vec<_> = create_chunk_ixz_iter().collect();
         let reader = MCAReader::from_file(path, false).unwrap();
         let mut builder = MCABuilder::new();
-        for (_, x, z) in avaliable_indexes
-            .into_iter()
-            .choose_multiple(&mut rng, chunks)
-        {
+        for (_, x, z) in avaliable_indexes.into_iter().choose_multiple(rng, chunks) {
             let chunk = reader.get_chunk_lazily(x, z);
             if let LazyChunk::Some(chunk) = chunk {
                 builder.set_chunk(x, z, chunk);
@@ -298,30 +335,131 @@ mod tests {
         for (_, x, z) in create_chunk_ixz_iter() {
             let chunk_a = reader_a.get_chunk(x, z).unwrap();
             let chunk_b = reader_b.get_chunk(x, z).unwrap();
-            assert_eq!(chunk_a, chunk_b);
+            if chunk_a.is_some() && chunk_b.is_some() {
+                let ChunkWithTimestamp {
+                    timestamp: ts_a,
+                    nbt: nbt_a,
+                } = chunk_a.unwrap();
+                let ChunkWithTimestamp {
+                    timestamp: ts_b,
+                    nbt: nbt_b,
+                } = chunk_b.unwrap();
+                assert_eq!(ts_a, ts_b);
+                assert_eq!(
+                    fastnbt::from_bytes::<Value>(nbt_a),
+                    fastnbt::from_bytes::<Value>(nbt_b)
+                );
+            } else {
+                assert_eq!(chunk_a, chunk_b);
+            }
         }
     }
-    #[test]
-    fn test_diff_patch_revert() -> () {
-        let paths = [
-            "./resources/mca/r.1.2.20250511.mca",
-            "./resources/mca/r.1.2.20250512.mca",
-            "./resources/mca/r.1.2.20250513.mca",
-            "./resources/mca/r.1.2.20250514.mca",
-            "./resources/mca/r.1.2.20250515.mca",
-            "./resources/mca/r.1.2.20250516.mca",
-        ];
-        let seed = 114514;
-        for path_old_new in paths.windows(2) {
-            let old = build_test_mca(path_old_new[0], 100, seed);
-            let new = build_test_mca(path_old_new[1], 100, seed);
-            let diff = RegionDiff::from_compare(&old, &new);
-            let patched_old = diff.patch(&old);
-            let reverted_new = diff.revert(&new);
+    mod test_in_continuous_data {
+        use super::*;
+        #[test]
+        fn test_diff_patch_revert() {
+            let paths = [
+                "./resources/mca/r.1.2.20250511.mca",
+                "./resources/mca/r.1.2.20250512.mca",
+                "./resources/mca/r.1.2.20250513.mca",
+                "./resources/mca/r.1.2.20250514.mca",
+                "./resources/mca/r.1.2.20250515.mca",
+                "./resources/mca/r.1.2.20250516.mca",
+            ];
+            let seed = 114514;
+            let rng = StdRng::seed_from_u64(seed);
+            for path_old_new in paths.windows(2) {
+                let old = build_test_mca(path_old_new[0], 100, &mut rng.clone());
+                let new = build_test_mca(path_old_new[1], 100, &mut rng.clone());
+                let diff = McaDiff::from_compare(&old, &new);
+                let patched_old = diff.patch(&old);
+                let reverted_new = diff.revert(&new);
 
-            assert_mca_eq(&new, &patched_old);
-            assert_mca_eq(&old, &reverted_new);
+                assert_mca_eq(&new, &patched_old);
+                assert_mca_eq(&old, &reverted_new);
+            }
+        }
+        #[test]
+        fn test_diff_squash() {
+            let paths = [
+                "./resources/mca/r.1.2.20250511.mca",
+                "./resources/mca/r.1.2.20250512.mca",
+                "./resources/mca/r.1.2.20250513.mca",
+                "./resources/mca/r.1.2.20250514.mca",
+                "./resources/mca/r.1.2.20250515.mca",
+                "./resources/mca/r.1.2.20250516.mca",
+            ];
+            let seed = 114514;
+            let rng = StdRng::seed_from_u64(seed);
+            for path_old_new in paths.windows(3) {
+                let v0 = build_test_mca(path_old_new[0], 50, &mut rng.clone());
+                let v1 = build_test_mca(path_old_new[1], 50, &mut rng.clone());
+                let v2 = build_test_mca(path_old_new[2], 50, &mut rng.clone());
+                let diff_v01 = McaDiff::from_compare(&v0, &v1);
+                let diff_v12 = McaDiff::from_compare(&v1, &v2);
+                let squashed_diff = McaDiff::from_squash(&diff_v01, &diff_v12);
+                let patched_v0 = squashed_diff.patch(&v0);
+                let reverted_v2 = squashed_diff.revert(&v2);
+
+                assert_mca_eq(&v2, &patched_v0);
+                assert_mca_eq(&v0, &reverted_v2);
+            }
         }
     }
-    // TODO: test_in_continuous_data & test_in_noncontinuous_data
+    mod test_in_noncontinuous_data {
+        use super::*;
+        #[test]
+        fn test_diff_patch_revert() {
+            let paths = [
+                "./resources/mca/r.1.2.20250511.mca",
+                "./resources/mca/r.1.2.20250512.mca",
+                "./resources/mca/r.1.2.20250513.mca",
+                "./resources/mca/r.1.2.20250514.mca",
+                "./resources/mca/r.1.2.20250515.mca",
+                "./resources/mca/r.1.2.20250516.mca",
+            ];
+            let seed = 114514;
+            let mut rng = StdRng::seed_from_u64(seed);
+            for path_old_new in paths.windows(2) {
+                let old = build_test_mca(path_old_new[0], 100, &mut rng);
+                let new = build_test_mca(path_old_new[1], 100, &mut rng);
+                let diff = McaDiff::from_compare(&old, &new);
+                let patched_old = diff.patch(&old);
+                let reverted_new = diff.revert(&new);
+
+                assert_mca_eq(&new, &patched_old);
+                assert_mca_eq(&old, &reverted_new);
+            }
+        }
+        #[test]
+        fn test_diff_squash() {
+            let paths = [
+                "./resources/mca/r.1.2.20250511.mca",
+                "./resources/mca/r.1.2.20250512.mca",
+                "./resources/mca/r.1.2.20250513.mca",
+                "./resources/mca/r.1.2.20250514.mca",
+                "./resources/mca/r.1.2.20250515.mca",
+                "./resources/mca/r.1.2.20250516.mca",
+            ];
+            let seed = 114514;
+            let mut rng = StdRng::seed_from_u64(seed);
+            for path_old_new in paths.windows(3) {
+                let v0 = build_test_mca(path_old_new[0], 50, &mut rng);
+                rng.next_u32();
+                let v1 = build_test_mca(path_old_new[1], 50, &mut rng);
+                rng.next_u32();
+                let v2 = build_test_mca(path_old_new[2], 50, &mut rng);
+                rng.next_u32();
+
+                let diff_v01 = McaDiff::from_compare(&v0, &v1);
+                let diff_v12 = McaDiff::from_compare(&v1, &v2);
+                let squashed_diff = McaDiff::from_squash(&diff_v01, &diff_v12);
+                let patched_v0 = squashed_diff.patch(&v0);
+                let reverted_v2 = squashed_diff.revert(&v2);
+
+                assert_mca_eq(&v2, &patched_v0);
+                assert_mca_eq(&v0, &reverted_v2);
+            }
+        }
+    }
 }
