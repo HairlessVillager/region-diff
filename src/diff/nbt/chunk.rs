@@ -8,7 +8,7 @@ use crate::{
     util::create_bincode_config,
 };
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Encode, Decode, Clone)]
 pub struct ChunkDiff {
     block_entities: MyersDiff,
     sections: Vec<MyersDiff>,

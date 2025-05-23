@@ -102,6 +102,10 @@ impl<R: Read + Seek> MCAReader<R> {
         let idx = x + 32 * z;
         &self.chunks[idx]
     }
+    pub fn get_timestamp(&self, x: usize, z: usize) -> u32 {
+        let idx = x + 32 * z;
+        self.header[idx].timestamp
+    }
 }
 
 impl MCAReader<BufReader<File>> {

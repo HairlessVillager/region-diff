@@ -4,7 +4,7 @@ pub mod nbt;
 
 use crate::object::Serde;
 
-pub trait Diff: Serde {
+pub trait Diff: Serde + Clone {
     fn from_compare(old: &[u8], new: &[u8]) -> Self
     where
         Self: Sized;

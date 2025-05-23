@@ -8,7 +8,7 @@ use crate::{
     util::create_bincode_config,
 };
 
-#[derive(Debug, Encode, Decode, PartialEq)]
+#[derive(Debug, Encode, Decode, PartialEq, Clone)]
 pub struct MyersDiff {
     old_text: Vec<u8>,
     new_text: Vec<u8>,
