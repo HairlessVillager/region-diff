@@ -41,7 +41,15 @@ impl Diff<Vec<u8>> for BlobDiff {
         self.old_text.clone()
     }
 }
+impl BlobDiff {
+    pub fn patch0(&self) -> Vec<u8> {
+        self.new_text.clone()
+    }
 
+    pub fn revert0(&self) -> Vec<u8> {
+        self.old_text.clone()
+    }
+}
 impl Serde for BlobDiff {
     fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
         encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))
