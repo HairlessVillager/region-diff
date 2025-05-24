@@ -372,6 +372,8 @@ impl Serde for MCADiff {
 }
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use fastnbt::Value;
     use rand::prelude::*;
 
@@ -523,14 +525,18 @@ mod tests {
 
     #[test]
     fn test_time_cost() {
-        use env_logger::Env;
+        // The next performance hotspot is the diff of sections, but since the
+        // current performance is already good enough, I don't plan to
+        // optimize this area in the near future.
 
         // env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
         //     .format_timestamp_micros()
         //     .init();
         log::debug!("reading files...");
-        let a = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250515.mca", 25, 29);
-        let b = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250516.mca", 25, 29);
+        // let a = fs::read("./resources/mca/r.1.2.20250515.mca").unwrap();
+        // let b = fs::read("./resources/mca/r.1.2.20250516.mca").unwrap();
+        let a = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250515.mca", 27, 26);
+        let b = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250516.mca", 27, 26);
         MCADiff::from_compare(&a, &b);
     }
 }

@@ -43,6 +43,7 @@ impl Diff<Value> for ChunkDiff {
         log::debug!("calc diff_sections...");
         let diff_sections;
         {
+            log::debug!("get old/new sections...");
             let old_sections = old.remove("sections").unwrap();
             let old_sections = match old_sections {
                 Value::List(x) => x,
@@ -55,6 +56,7 @@ impl Diff<Value> for ChunkDiff {
             };
             assert_eq!(old_sections.len(), new_sections.len());
 
+            log::debug!("calc diff_sections by old/new sections...");
             let mut mut_diff_sections = Vec::with_capacity(old_sections.len());
             for (old, new) in old_sections.iter().zip(new_sections.iter()) {
                 let old = fastnbt::to_bytes(old).unwrap();
