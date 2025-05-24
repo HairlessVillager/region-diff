@@ -26,6 +26,13 @@ pub fn unwrap_with_root_compound(value: fastnbt::Value) -> fastnbt::Value {
     }
 }
 
+pub fn fastnbt_serialize(v: &fastnbt::Value) -> Vec<u8> {
+    fastnbt::to_bytes(v).unwrap()
+}
+pub fn fastnbt_deserialize(input: &[u8]) -> fastnbt::Value {
+    fastnbt::from_bytes(input).unwrap()
+}
+
 pub mod test {
     use fastnbt::Value;
     use rand::prelude::*;

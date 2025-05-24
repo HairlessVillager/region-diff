@@ -16,7 +16,7 @@ impl SerdeError {
 }
 pub trait Serde {
     fn serialize(&self) -> Result<Vec<u8>, SerdeError>;
-    fn deserialize(bytes: &[u8]) -> Result<Self, SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<Self, SerdeError>
     where
         Self: Sized;
 }

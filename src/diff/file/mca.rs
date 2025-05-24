@@ -9,7 +9,7 @@ use crate::{
     },
     mca::{ChunkWithTimestamp, CompressionType, LazyChunk, MCABuilder, MCAReader},
     object::{Serde, SerdeError},
-    util::create_chunk_ixz_iter,
+    util::{create_chunk_ixz_iter, fastnbt_deserialize as de, fastnbt_serialize as ser},
 };
 
 #[derive(Debug, Clone)]
@@ -40,8 +40,8 @@ pub struct MCADiff {
     chunks: [ChunkWithTimestampDiff; 1024],
 }
 
-impl Diff for MCADiff {
-    fn from_compare(old: &[u8], new: &[u8]) -> Self
+impl Diff<Vec<u8>> for MCADiff {
+    fn from_compare(old: &Vec<u8>, new: &Vec<u8>) -> Self
     where
         Self: Sized,
     {
@@ -80,13 +80,13 @@ impl Diff for MCADiff {
                         (LazyChunk::NotExists, LazyChunk::Some(chunk)) => {
                             ChunkWithTimestampDiff::Create(
                                 chunk.timestamp as i32 - 0,
-                                BlobDiff::from_compare(&[], &chunk.nbt),
+                                BlobDiff::from_compare(&Vec::with_capacity(0), &chunk.nbt),
                             )
                         }
                         (LazyChunk::Some(chunk), LazyChunk::NotExists) => {
                             ChunkWithTimestampDiff::Delete(
                                 0 - chunk.timestamp as i32,
-                                BlobDiff::from_compare(&chunk.nbt, &[]),
+                                BlobDiff::from_compare(&chunk.nbt, &Vec::with_capacity(0)),
                             )
                         }
                         (LazyChunk::Some(chunk_old), LazyChunk::Some(chunk_new)) => {
@@ -96,7 +96,10 @@ impl Diff for MCADiff {
                             } else {
                                 ChunkWithTimestampDiff::Update(
                                     ts_diff,
-                                    ChunkDiff::from_compare(&chunk_old.nbt, &chunk_new.nbt),
+                                    ChunkDiff::from_compare(
+                                        &de(&chunk_old.nbt),
+                                        &de(&chunk_new.nbt),
+                                    ),
                                 )
                             }
                         }
@@ -160,8 +163,8 @@ impl Diff for MCADiff {
                 ) => ChunkWithTimestampDiff::Update(
                     *base_ts_diff + *squashing_ts_diff,
                     ChunkDiff::from_compare(
-                        base_chunk_diff.get_old_text(),
-                        squashing_chunk_diff.get_new_text(),
+                        &de(base_chunk_diff.get_old_text()),
+                        &de(squashing_chunk_diff.get_new_text()),
                     ),
                 ),
 
@@ -192,7 +195,7 @@ impl Diff for MCADiff {
                     *base_ts_diff + *squashing_ts_diff,
                     BlobDiff::from_compare(
                         base_chunk_diff.get_old_text(),
-                        &squashing_chunk_diff.patch(base_chunk_diff.get_new_text()),
+                        &ser(&squashing_chunk_diff.patch(&de(base_chunk_diff.get_new_text()))),
                     ),
                 ),
                 (
@@ -201,7 +204,7 @@ impl Diff for MCADiff {
                 ) => ChunkWithTimestampDiff::Delete(
                     *base_ts_diff + *squashing_ts_diff,
                     BlobDiff::from_compare(
-                        &base_chunk_diff.revert(squashing_chunk_diff.get_old_text()),
+                        &ser(&base_chunk_diff.revert(&de(squashing_chunk_diff.get_old_text()))),
                         squashing_chunk_diff.get_new_text(),
                     ),
                 ),
@@ -248,7 +251,7 @@ impl Diff for MCADiff {
         }
     }
 
-    fn patch(&self, old: &[u8]) -> Vec<u8> {
+    fn patch(&self, old: &Vec<u8>) -> Vec<u8> {
         let reader = MCAReader::from_bytes(old).unwrap();
         let mut builder = MCABuilder::new();
         let mut chunks_holder = Vec::with_capacity(1024);
@@ -268,7 +271,7 @@ impl Diff for MCADiff {
                     assert!(*timestamp_diff != 0);
                     Some(ChunkWithTimestamp {
                         timestamp: *timestamp_diff as u32,
-                        nbt: chunk_diff.patch(&[]),
+                        nbt: chunk_diff.patch(&Vec::with_capacity(0)),
                     })
                 }
                 (LazyChunk::NotExists, diff) => panic!(
@@ -286,7 +289,7 @@ impl Diff for MCADiff {
                         .timestamp
                         .checked_add_signed(*timestamp_diff)
                         .expect("timestamp overflowed"),
-                    nbt: chunk_diff.patch(&old_chunk.nbt),
+                    nbt: ser(&chunk_diff.patch(&de(&old_chunk.nbt))),
                 }),
                 (LazyChunk::Some(_), diff) => panic!(
                     "old chunk exists, while chunk diff {}, which is impossible",
@@ -303,7 +306,7 @@ impl Diff for MCADiff {
         builder.to_bytes(CompressionType::Zlib)
     }
 
-    fn revert(&self, new: &[u8]) -> Vec<u8> {
+    fn revert(&self, new: &Vec<u8>) -> Vec<u8> {
         let reader = MCAReader::from_bytes(new).unwrap();
         let mut builder = MCABuilder::new();
         let mut chunks_holder = Vec::with_capacity(1024);
@@ -321,7 +324,7 @@ impl Diff for MCADiff {
                     LazyChunk::NotExists,
                 ) => Some(ChunkWithTimestamp {
                     timestamp: (-*timestamp_diff) as u32,
-                    nbt: chunk_diff.revert(&[]),
+                    nbt: chunk_diff.revert(&Vec::with_capacity(0)),
                 }),
                 (diff, LazyChunk::NotExists) => panic!(
                     "diff {}, while new chunk not exists, which is impossible",
@@ -338,7 +341,7 @@ impl Diff for MCADiff {
                         .timestamp
                         .checked_add_signed(-*timestamp_diff)
                         .expect("timestamp overflowed"),
-                    nbt: chunk_diff.revert(&new_chunk.nbt),
+                    nbt: ser(&chunk_diff.revert(&de(&new_chunk.nbt))),
                 }),
                 (diff, LazyChunk::Some(_)) => panic!(
                     "diff {}, while new chunk exists, which is impossible",
@@ -360,7 +363,7 @@ impl Serde for MCADiff {
         todo!()
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<Self, SerdeError>
     where
         Self: Sized,
     {

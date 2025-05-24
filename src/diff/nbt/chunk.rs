@@ -20,20 +20,18 @@ fn pop_block_entities_from(compound_map: &mut BTreeMap<String, Value>) -> Vec<u8
     log::debug!("wrapped: {:#?}", wrapped);
     fastnbt::to_bytes(&wrapped).unwrap()
 }
-impl Diff for ChunkDiff {
-    fn from_compare(old_nbt: &[u8], new_nbt: &[u8]) -> Self
+impl Diff<Value> for ChunkDiff {
+    fn from_compare(old: &Value, new: &Value) -> Self
     where
         Self: Sized,
     {
         log::debug!("from_compare()...");
-        let old: Value = fastnbt::from_bytes(old_nbt).unwrap();
         let mut old = match old {
-            Value::Compound(x) => x,
+            Value::Compound(x) => x.clone(),
             _ => panic!("invalid old nbt"),
         };
-        let new: Value = fastnbt::from_bytes(new_nbt).unwrap();
         let mut new = match new {
-            Value::Compound(x) => x,
+            Value::Compound(x) => x.clone(),
             _ => panic!("invalid new nbt"),
         };
 
@@ -76,8 +74,8 @@ impl Diff for ChunkDiff {
         log::debug!("calc diff_others...");
         let diff_others;
         {
-            let old_others = fastnbt::to_bytes(&Value::Compound(old)).unwrap();
-            let new_others = fastnbt::to_bytes(&Value::Compound(new)).unwrap();
+            let old_others = fastnbt::to_bytes(&Value::Compound(old.clone())).unwrap();
+            let new_others = fastnbt::to_bytes(&Value::Compound(new.clone())).unwrap();
             diff_others = MyersDiff::from_compare(&old_others, &new_others);
         }
 
@@ -109,10 +107,9 @@ impl Diff for ChunkDiff {
         }
     }
 
-    fn patch(&self, old_nbt: &[u8]) -> Vec<u8> {
-        let old: Value = fastnbt::from_bytes(old_nbt).unwrap();
+    fn patch(&self, old: &Value) -> Value {
         let mut old = match old {
-            Value::Compound(x) => x,
+            Value::Compound(x) => x.clone(),
             _ => panic!("invalid old nbt"),
         };
 
@@ -157,13 +154,12 @@ impl Diff for ChunkDiff {
         others.insert("sections".to_string(), Value::List(sections));
         others.insert("block_entities".to_string(), block_entities);
 
-        fastnbt::to_bytes(&Value::Compound(others)).unwrap()
+        Value::Compound(others)
     }
 
-    fn revert(&self, new_nbt: &[u8]) -> Vec<u8> {
-        let new: Value = fastnbt::from_bytes(new_nbt).unwrap();
+    fn revert(&self, new: &Value) -> Value {
         let mut new = match new {
-            Value::Compound(x) => x,
+            Value::Compound(x) => x.clone(),
             _ => panic!("invalid new nbt"),
         };
 
@@ -207,7 +203,7 @@ impl Diff for ChunkDiff {
         others.insert("sections".to_string(), Value::List(sections));
         others.insert("block_entities".to_string(), block_entities);
 
-        fastnbt::to_bytes(&Value::Compound(others)).unwrap()
+        Value::Compound(others)
     }
 }
 impl Serde for ChunkDiff {
@@ -215,7 +211,7 @@ impl Serde for ChunkDiff {
         encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<Self, SerdeError>
     where
         Self: Sized,
     {
@@ -232,8 +228,6 @@ mod tests {
 
     use super::*;
     mod test_in_continuous_data {
-        use fastnbt::Value;
-
         use crate::util::test::get_test_chunk;
 
         use super::*;
@@ -244,20 +238,13 @@ mod tests {
             let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_old);
             let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", &mut rng_new);
             for _ in 0..100 {
-                let old = old_iter.next().unwrap(); // NOTE: root compound has unsorted key, cannot assert_eq directly
-                let new = new_iter.next().unwrap(); // NOTE: root compound has unsorted key, cannot assert_eq directly
+                let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
+                let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
                 let diff = ChunkDiff::from_compare(&old, &new);
                 let patched_old = diff.patch(&old);
                 let reverted_new = diff.revert(&new);
-
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(&new),
-                    fastnbt::from_bytes::<Value>(&patched_old)
-                );
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(&old),
-                    fastnbt::from_bytes::<Value>(&reverted_new)
-                );
+                assert_eq!(new, patched_old);
+                assert_eq!(old, reverted_new);
             }
         }
         #[test]
@@ -269,28 +256,20 @@ mod tests {
             let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
             let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
             for _ in 0..100 {
-                let v0 = v0_iter.next().unwrap();
-                let v1 = v1_iter.next().unwrap();
-                let v2 = v2_iter.next().unwrap();
+                let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
+                let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
+                let v2 = fastnbt::from_bytes(&v2_iter.next().unwrap()).unwrap();
                 let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
                 let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
                 let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
                 let patched_v0 = squashed_diff.patch(&v0);
                 let reverted_v2 = squashed_diff.revert(&v2);
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(&v2),
-                    fastnbt::from_bytes::<Value>(&patched_v0)
-                );
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(&v0),
-                    fastnbt::from_bytes::<Value>(&reverted_v2)
-                );
+                assert_eq!(v2, patched_v0);
+                assert_eq!(v0, reverted_v2);
             }
         }
     }
     mod test_in_noncontinuous_data {
-        use fastnbt::Value;
-
         use crate::util::test::get_test_chunk;
 
         use super::*;
@@ -302,20 +281,13 @@ mod tests {
             let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_old);
             let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", &mut rng_new);
             for _ in 0..3 {
-                let old = old_iter.next().unwrap(); // NOTE: root compound has unsorted key, cannot assert_eq directly
-                let new = new_iter.next().unwrap(); // NOTE: root compound has unsorted key, cannot assert_eq directly
+                let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
+                let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
                 let diff = ChunkDiff::from_compare(&old, &new);
                 let patched_old = diff.patch(&old);
                 let reverted_new = diff.revert(&new);
-
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(&new),
-                    fastnbt::from_bytes::<Value>(&patched_old)
-                );
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(&old),
-                    fastnbt::from_bytes::<Value>(&reverted_new)
-                );
+                assert_eq!(new, patched_old);
+                assert_eq!(old, reverted_new);
             }
         }
         #[test]
@@ -329,23 +301,16 @@ mod tests {
             let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
             let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
             for _ in 0..3 {
-                let v0 = v0_iter.next().unwrap();
-                let v1 = v1_iter.next().unwrap();
-                let v2 = v2_iter.next().unwrap();
+                let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
+                let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
+                let v2 = fastnbt::from_bytes(&v2_iter.next().unwrap()).unwrap();
                 let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
                 let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
                 let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
                 let patched_v0 = squashed_diff.patch(&v0);
                 let reverted_v2 = squashed_diff.revert(&v2);
-
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(&v2),
-                    fastnbt::from_bytes::<Value>(&patched_v0)
-                );
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(&v0),
-                    fastnbt::from_bytes::<Value>(&reverted_v2)
-                );
+                assert_eq!(v2, patched_v0);
+                assert_eq!(v0, reverted_v2);
             }
         }
     }

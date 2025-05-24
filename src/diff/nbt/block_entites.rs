@@ -9,6 +9,7 @@ use crate::{
     },
     object::Serde,
 };
+type XYZ = (i32, i32, i32);
 
 #[derive(Debug, Clone)]
 enum BlockEntityDiff {
@@ -22,9 +23,7 @@ enum BlockEntityDiff {
 pub struct BlockEntitiesDiff {
     map: BTreeMap<XYZ, BlockEntityDiff>,
 }
-type XYZ = (i32, i32, i32);
-type IDAndValue<'a> = (String, &'a Value);
-fn build_bes_map(bes: &Value) -> BTreeMap<XYZ, IDAndValue> {
+fn build_bes_map(bes: &Value) -> BTreeMap<(i32, i32, i32), (String, &Value)> {
     match bes {
         Value::List(bes) => BTreeMap::from_iter(bes.iter().map(|be| match be {
             Value::Compound(kv) => {
@@ -67,12 +66,12 @@ impl BlockEntitiesDiff {
             let diff = match (old, new) {
                 (None, None) => panic!("block not exists in both old and new block entities"),
                 (None, Some((_, v))) => BlockEntityDiff::Create(BlobDiff::from_compare(
-                    &[],
+                    &Vec::with_capacity(0),
                     &fastnbt::to_bytes(v).unwrap(),
                 )),
                 (Some((_, v)), None) => BlockEntityDiff::Delete(BlobDiff::from_compare(
                     &fastnbt::to_bytes(v).unwrap(),
-                    &[],
+                    &Vec::with_capacity(0),
                 )),
                 (Some((old_id, old_v)), Some((new_id, new_v))) => {
                     if old_id == new_id {
@@ -93,15 +92,46 @@ impl BlockEntitiesDiff {
         Self { map }
     }
 }
-impl Diff for BlockEntitiesDiff {
-    fn from_compare(old: &[u8], new: &[u8]) -> Self
-    where
-        Self: Sized,
-    {
-        Self::from_compare(
-            &fastnbt::from_bytes(old).unwrap(),
-            &fastnbt::from_bytes(new).unwrap(),
-        )
+impl Diff<Value> for BlockEntitiesDiff {
+    fn from_compare(old: &Value, new: &Value) -> Self {
+        let old_bes_map = build_bes_map(old);
+        let new_bes_map = build_bes_map(new);
+        let xyzs = BTreeSet::from_iter(
+            old_bes_map
+                .keys()
+                .into_iter()
+                .chain(new_bes_map.keys().into_iter()),
+        );
+        let map = BTreeMap::from_iter(xyzs.into_iter().map(|xyz| {
+            let old = old_bes_map.get(xyz);
+            let new = new_bes_map.get(xyz);
+            let diff = match (old, new) {
+                (None, None) => panic!("block not exists in both old and new block entities"),
+                (None, Some((_, v))) => BlockEntityDiff::Create(BlobDiff::from_compare(
+                    &Vec::with_capacity(0),
+                    &fastnbt::to_bytes(v).unwrap(),
+                )),
+                (Some((_, v)), None) => BlockEntityDiff::Delete(BlobDiff::from_compare(
+                    &fastnbt::to_bytes(v).unwrap(),
+                    &Vec::with_capacity(0),
+                )),
+                (Some((old_id, old_v)), Some((new_id, new_v))) => {
+                    if old_id == new_id {
+                        BlockEntityDiff::UpdateSameID(MyersDiff::from_compare(
+                            &fastnbt::to_bytes(old_v).unwrap(),
+                            &fastnbt::to_bytes(new_v).unwrap(),
+                        ))
+                    } else {
+                        BlockEntityDiff::UpdateDiffID(BlobDiff::from_compare(
+                            &fastnbt::to_bytes(old_v).unwrap(),
+                            &fastnbt::to_bytes(new_v).unwrap(),
+                        ))
+                    }
+                }
+            };
+            (xyz.clone(), diff)
+        }));
+        Self { map }
     }
 
     fn from_squash(base: &Self, squashing: &Self) -> Self
@@ -111,11 +141,11 @@ impl Diff for BlockEntitiesDiff {
         todo!()
     }
 
-    fn patch(&self, old: &[u8]) -> Vec<u8> {
+    fn patch(&self, old: &Value) -> Value {
         todo!()
     }
 
-    fn revert(&self, new: &[u8]) -> Vec<u8> {
+    fn revert(&self, new: &Value) -> Value {
         todo!()
     }
 }
@@ -124,7 +154,7 @@ impl Serde for BlockEntitiesDiff {
         todo!()
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, crate::object::SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<Self, crate::object::SerdeError>
     where
         Self: Sized,
     {

@@ -16,8 +16,8 @@ pub struct BlobDiff {
     new_text: Vec<u8>,
 }
 
-impl Diff for BlobDiff {
-    fn from_compare(old: &[u8], new: &[u8]) -> Self {
+impl Diff<Vec<u8>> for BlobDiff {
+    fn from_compare(old: &Vec<u8>, new: &Vec<u8>) -> Self {
         Self {
             old_text: old.to_vec(),
             new_text: new.to_vec(),
@@ -31,12 +31,12 @@ impl Diff for BlobDiff {
         }
     }
 
-    fn patch(&self, old: &[u8]) -> Vec<u8> {
+    fn patch(&self, old: &Vec<u8>) -> Vec<u8> {
         let _ = old;
         self.new_text.clone()
     }
 
-    fn revert(&self, new: &[u8]) -> Vec<u8> {
+    fn revert(&self, new: &Vec<u8>) -> Vec<u8> {
         let _ = new;
         self.old_text.clone()
     }
@@ -47,7 +47,7 @@ impl Serde for BlobDiff {
         encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))
     }
 
-    fn deserialize(bytes: &[u8]) -> Result<Self, SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<Self, SerdeError>
     where
         Self: Sized,
     {
@@ -61,12 +61,12 @@ impl Serde for BlobDiff {
 
 impl BlobDiff {
     pub fn new() -> Self {
-        Self::from_compare(&[], &[])
+        Self::from_compare(&Vec::with_capacity(0), &Vec::with_capacity(0))
     }
-    pub fn get_old_text(&self) -> &[u8] {
+    pub fn get_old_text(&self) -> &Vec<u8> {
         &self.old_text
     }
-    pub fn get_new_text(&self) -> &[u8] {
+    pub fn get_new_text(&self) -> &Vec<u8> {
         &self.new_text
     }
     pub fn is_creation(&self) -> bool {
