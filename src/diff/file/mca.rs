@@ -1,3 +1,6 @@
+use log::{Level, log_enabled};
+use std::time::{Duration, Instant};
+
 use crate::{
     diff::{
         Diff,
@@ -33,19 +36,32 @@ impl ChunkWithTimestampDiff {
     }
 }
 #[derive(Debug, Clone)]
-pub struct McaDiff {
+pub struct MCADiff {
     chunks: [ChunkWithTimestampDiff; 1024],
 }
 
-impl Diff for McaDiff {
+impl Diff for MCADiff {
     fn from_compare(old: &[u8], new: &[u8]) -> Self
     where
         Self: Sized,
     {
         let reader_old = MCAReader::from_bytes(old).unwrap();
         let reader_new = MCAReader::from_bytes(new).unwrap();
+        let enable_cost_stat = log_enabled!(Level::Info);
+        let mut chunk_costs = if enable_cost_stat {
+            Vec::with_capacity(1024)
+        } else {
+            Vec::with_capacity(0)
+        };
+        log::debug!("from_compare()...");
         let mut chunks = [const { ChunkWithTimestampDiff::BothNotExist }; 1024];
+        let mut timing_start = Instant::now();
         for (i, x, z) in create_chunk_ixz_iter() {
+            // log::debug!("compare chunk i: {}", i);
+            if log_enabled!(Level::Info) {
+                timing_start = Instant::now();
+            }
+
             let old_ts = reader_old.get_timestamp(x, z);
             let new_ts = reader_new.get_timestamp(x, z);
             let ts_diff = new_ts as i32 - old_ts as i32;
@@ -88,6 +104,32 @@ impl Diff for McaDiff {
                 }
             };
             chunks[i] = chunk;
+
+            if enable_cost_stat {
+                let timing_duration = timing_start.elapsed();
+                chunk_costs.push((timing_duration, i, x, z));
+            }
+        }
+        if enable_cost_stat {
+            chunk_costs.sort_by(|a, b| b.0.cmp(&a.0));
+            let total_cost = chunk_costs.iter().map(|(d, _, _, _)| d).sum::<Duration>();
+            log::info!(
+                "chunk time costs stat:\n- total {:?}\n- avg   {:?}\n- p100  {:?}\n- p99   {:?}\n- p95   {:?}\n- p50   {:?}",
+                total_cost,
+                total_cost / 1024,
+                chunk_costs[0].0,
+                chunk_costs[10].0,
+                chunk_costs[51].0,
+                chunk_costs[512].0,
+            );
+            log::debug!(
+                "chunk time costs top 8:\n{}",
+                chunk_costs[0..8]
+                    .iter()
+                    .map(|(d, i, x, z)| format!("- chunk {} ({}, {}) (cost {:?})", i, x, z, d))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
         }
         Self { chunks }
     }
@@ -101,7 +143,7 @@ impl Diff for McaDiff {
             let chunk_diff_base = &base.chunks[i];
             let chunk_diff_squashing = &squashing.chunks[i];
             squashed_chunks[i] = match (chunk_diff_base, chunk_diff_squashing) {
-                // BothNotExists and BothNotExists
+                // BothNotExist and BothNotExist
                 (ChunkWithTimestampDiff::BothNotExist, ChunkWithTimestampDiff::BothNotExist) => {
                     ChunkWithTimestampDiff::BothNotExist
                 }
@@ -123,7 +165,7 @@ impl Diff for McaDiff {
                     ),
                 ),
 
-                // BothNotExists then Create or Delete then BothNotExists
+                // BothNotExist then Create or Delete then BothNotExist
                 (
                     ChunkWithTimestampDiff::BothNotExist,
                     ChunkWithTimestampDiff::Create(ts_diff, blob_diff),
@@ -313,7 +355,7 @@ impl Diff for McaDiff {
         builder.to_bytes(CompressionType::Zlib)
     }
 }
-impl Serde for McaDiff {
+impl Serde for MCADiff {
     fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
         todo!()
     }
@@ -333,7 +375,7 @@ mod tests {
     use super::*;
     use crate::{
         mca::{LazyChunk, MCAReader},
-        util::rearranged_nbt,
+        util::test::{build_test_mca_with_one_chunk, rearranged_nbt},
     };
 
     #[test]
@@ -363,46 +405,9 @@ mod tests {
         // assert!(ts_changed_chunk_count > 20);
         // assert!(ts_unchanged_chunk_count > 20);
     }
-    fn build_test_mca(path: &str, chunks: usize, rng: &mut StdRng) -> Vec<u8> {
-        let avaliable_indexes: Vec<_> = create_chunk_ixz_iter().collect();
-        let reader = MCAReader::from_file(path, false).unwrap();
-        let mut builder = MCABuilder::new();
-        for (_, x, z) in avaliable_indexes.into_iter().choose_multiple(rng, chunks) {
-            let chunk = reader.get_chunk_lazily(x, z);
-            if let LazyChunk::Some(chunk) = chunk {
-                builder.set_chunk(x, z, chunk);
-            } else {
-                panic!("chunk is not avaliable");
-            }
-        }
-        builder.to_bytes(CompressionType::Zlib)
-    }
-    fn assert_mca_eq(a: &[u8], b: &[u8]) {
-        let mut reader_a = MCAReader::from_bytes(a).unwrap();
-        let mut reader_b = MCAReader::from_bytes(b).unwrap();
-        for (_, x, z) in create_chunk_ixz_iter() {
-            let chunk_a = reader_a.get_chunk(x, z).unwrap();
-            let chunk_b = reader_b.get_chunk(x, z).unwrap();
-            if chunk_a.is_some() && chunk_b.is_some() {
-                let ChunkWithTimestamp {
-                    timestamp: ts_a,
-                    nbt: nbt_a,
-                } = chunk_a.unwrap();
-                let ChunkWithTimestamp {
-                    timestamp: ts_b,
-                    nbt: nbt_b,
-                } = chunk_b.unwrap();
-                assert_eq!(ts_a, ts_b);
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(nbt_a),
-                    fastnbt::from_bytes::<Value>(nbt_b)
-                );
-            } else {
-                assert_eq!(chunk_a, chunk_b);
-            }
-        }
-    }
     mod test_in_continuous_data {
+        use crate::util::test::{assert_mca_eq, build_test_mca};
+
         use super::*;
         #[test]
         fn test_diff_patch_revert() {
@@ -419,7 +424,7 @@ mod tests {
             for path_old_new in paths.windows(2) {
                 let old = build_test_mca(path_old_new[0], 100, &mut rng.clone());
                 let new = build_test_mca(path_old_new[1], 100, &mut rng.clone());
-                let diff = McaDiff::from_compare(&old, &new);
+                let diff = MCADiff::from_compare(&old, &new);
                 let patched_old = diff.patch(&old);
                 let reverted_new = diff.revert(&new);
 
@@ -443,9 +448,9 @@ mod tests {
                 let v0 = build_test_mca(path_old_new[0], 50, &mut rng.clone());
                 let v1 = build_test_mca(path_old_new[1], 50, &mut rng.clone());
                 let v2 = build_test_mca(path_old_new[2], 50, &mut rng.clone());
-                let diff_v01 = McaDiff::from_compare(&v0, &v1);
-                let diff_v12 = McaDiff::from_compare(&v1, &v2);
-                let squashed_diff = McaDiff::from_squash(&diff_v01, &diff_v12);
+                let diff_v01 = MCADiff::from_compare(&v0, &v1);
+                let diff_v12 = MCADiff::from_compare(&v1, &v2);
+                let squashed_diff = MCADiff::from_squash(&diff_v01, &diff_v12);
                 let patched_v0 = squashed_diff.patch(&v0);
                 let reverted_v2 = squashed_diff.revert(&v2);
 
@@ -455,6 +460,8 @@ mod tests {
         }
     }
     mod test_in_noncontinuous_data {
+        use crate::util::test::{assert_mca_eq, build_test_mca};
+
         use super::*;
         #[test]
         fn test_diff_patch_revert() {
@@ -471,7 +478,7 @@ mod tests {
             for path_old_new in paths.windows(2) {
                 let old = build_test_mca(path_old_new[0], 100, &mut rng);
                 let new = build_test_mca(path_old_new[1], 100, &mut rng);
-                let diff = McaDiff::from_compare(&old, &new);
+                let diff = MCADiff::from_compare(&old, &new);
                 let patched_old = diff.patch(&old);
                 let reverted_new = diff.revert(&new);
 
@@ -499,9 +506,9 @@ mod tests {
                 let v2 = build_test_mca(path_old_new[2], 50, &mut rng);
                 rng.next_u32();
 
-                let diff_v01 = McaDiff::from_compare(&v0, &v1);
-                let diff_v12 = McaDiff::from_compare(&v1, &v2);
-                let squashed_diff = McaDiff::from_squash(&diff_v01, &diff_v12);
+                let diff_v01 = MCADiff::from_compare(&v0, &v1);
+                let diff_v12 = MCADiff::from_compare(&v1, &v2);
+                let squashed_diff = MCADiff::from_squash(&diff_v01, &diff_v12);
                 let patched_v0 = squashed_diff.patch(&v0);
                 let reverted_v2 = squashed_diff.revert(&v2);
 
@@ -509,5 +516,18 @@ mod tests {
                 assert_mca_eq(&v0, &reverted_v2);
             }
         }
+    }
+
+    #[test]
+    fn test_time_cost() {
+        use env_logger::Env;
+
+        // env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
+        //     .format_timestamp_micros()
+        //     .init();
+        log::debug!("reading files...");
+        let a = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250515.mca", 25, 29);
+        let b = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250516.mca", 25, 29);
+        MCADiff::from_compare(&a, &b);
     }
 }

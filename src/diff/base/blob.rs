@@ -79,21 +79,10 @@ impl BlobDiff {
 
 #[cfg(test)]
 mod tests {
+    use crate::util::test::create_test_bytes;
+
     use super::*;
 
-    fn create_test_bytes(seed: u64) -> impl Iterator<Item = Vec<u8>> {
-        use rand::prelude::*;
-        let mut rng = StdRng::seed_from_u64(seed);
-
-        std::iter::repeat_with(move || {
-            let len = rng.random_range(0..10);
-            let mut bytes = Vec::with_capacity(len);
-            for _ in 0..len {
-                bytes.push(rng.random_range(0..3) as u8);
-            }
-            bytes
-        })
-    }
     #[test]
     fn test_diff_patch_revert() -> () {
         let mut old_iter = create_test_bytes(114514);

@@ -26,6 +26,7 @@ fn unwrap_with_root_compound(value: Value) -> Value {
 fn pop_block_entities_from(compound_map: &mut BTreeMap<String, Value>) -> Vec<u8> {
     let block_entities = compound_map.remove("block_entities").unwrap();
     let wrapped = wrap_with_root_compound(block_entities);
+    log::debug!("wrapped: {:#?}", wrapped);
     fastnbt::to_bytes(&wrapped).unwrap()
 }
 impl Diff for ChunkDiff {
@@ -33,6 +34,7 @@ impl Diff for ChunkDiff {
     where
         Self: Sized,
     {
+        log::debug!("from_compare()...");
         let old: Value = fastnbt::from_bytes(old_nbt).unwrap();
         let mut old = match old {
             Value::Compound(x) => x,
@@ -44,13 +46,18 @@ impl Diff for ChunkDiff {
             _ => panic!("invalid new nbt"),
         };
 
+        log::debug!("calc diff_block_entities...");
         let diff_block_entities;
         {
+            log::debug!("pop_block_entities_from for old...");
             let old_block_entities = pop_block_entities_from(&mut old);
+            log::debug!("pop_block_entities_from for new...");
             let new_block_entities = pop_block_entities_from(&mut new);
+            log::debug!("MyersDiff::from_compare...");
             diff_block_entities = MyersDiff::from_compare(&old_block_entities, &new_block_entities);
         }
 
+        log::debug!("calc diff_sections...");
         let diff_sections;
         {
             let old_sections = old.remove("sections").unwrap();
@@ -75,6 +82,7 @@ impl Diff for ChunkDiff {
             diff_sections = mut_diff_sections;
         }
 
+        log::debug!("calc diff_others...");
         let diff_others;
         {
             let old_others = fastnbt::to_bytes(&Value::Compound(old)).unwrap();
@@ -82,6 +90,7 @@ impl Diff for ChunkDiff {
             diff_others = MyersDiff::from_compare(&old_others, &new_others);
         }
 
+        log::debug!("from_compare()...done");
         Self {
             block_entities: diff_block_entities,
             sections: diff_sections,
@@ -233,18 +242,10 @@ mod tests {
     use crate::{mca::MCAReader, util::create_chunk_ixz_iter};
 
     use super::*;
-    fn get_test_chunk(path: &str, rng: &mut StdRng) -> impl Iterator<Item = Vec<u8>> {
-        let mut reader = MCAReader::from_file(path, false).unwrap();
-        let mut xzs = [(0, 0); 1024];
-        for (i, x, z) in create_chunk_ixz_iter() {
-            xzs[i] = (x, z);
-        }
-        xzs.shuffle(rng);
-        xzs.into_iter()
-            .map(move |(x, z)| reader.get_chunk(x, z).unwrap().unwrap().nbt.clone())
-    }
     mod test_in_continuous_data {
         use fastnbt::Value;
+
+        use crate::util::test::get_test_chunk;
 
         use super::*;
         #[test]
@@ -274,13 +275,11 @@ mod tests {
         fn test_diff_squash() -> () {
             let mut rng_v0 = StdRng::seed_from_u64(114514);
             let mut rng_v1 = rng_v0.clone();
-            rng_v1.next_u32();
             let mut rng_v2 = rng_v1.clone();
-            rng_v2.next_u32();
             let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_v0);
             let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
             let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
-            for _ in 0..100 {
+            for i in 0..100 {
                 let v0 = v0_iter.next().unwrap();
                 let v1 = v1_iter.next().unwrap();
                 let v2 = v2_iter.next().unwrap();
@@ -289,7 +288,6 @@ mod tests {
                 let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
                 let patched_v0 = squashed_diff.patch(&v0);
                 let reverted_v2 = squashed_diff.revert(&v2);
-
                 assert_eq!(
                     fastnbt::from_bytes::<Value>(&v2),
                     fastnbt::from_bytes::<Value>(&patched_v0)
@@ -303,6 +301,8 @@ mod tests {
     }
     mod test_in_noncontinuous_data {
         use fastnbt::Value;
+
+        use crate::util::test::get_test_chunk;
 
         use super::*;
         #[test]
