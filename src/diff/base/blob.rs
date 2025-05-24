@@ -41,15 +41,6 @@ impl Diff<Vec<u8>> for BlobDiff {
         self.old_text.clone()
     }
 }
-impl BlobDiff {
-    pub fn patch0(&self) -> Vec<u8> {
-        self.new_text.clone()
-    }
-
-    pub fn revert0(&self) -> Vec<u8> {
-        self.old_text.clone()
-    }
-}
 impl Serde for BlobDiff {
     fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
         encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))
@@ -71,6 +62,12 @@ impl BlobDiff {
     pub fn new() -> Self {
         Self::from_compare(&Vec::with_capacity(0), &Vec::with_capacity(0))
     }
+    pub fn from_create(new: &Vec<u8>) -> Self {
+        Self::from_compare(&Vec::with_capacity(0), new)
+    }
+    pub fn from_delete(old: &Vec<u8>) -> Self {
+        Self::from_compare(old, &Vec::with_capacity(0))
+    }
     pub fn get_old_text(&self) -> &Vec<u8> {
         &self.old_text
     }
@@ -82,6 +79,12 @@ impl BlobDiff {
     }
     pub fn is_deletion(&self) -> bool {
         self.new_text.len() == 0
+    }
+    pub fn patch0(&self) -> Vec<u8> {
+        self.new_text.clone()
+    }
+    pub fn revert0(&self) -> Vec<u8> {
+        self.old_text.clone()
     }
 }
 

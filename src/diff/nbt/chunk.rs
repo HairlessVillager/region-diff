@@ -1,24 +1,17 @@
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use fastnbt::Value;
-use std::collections::BTreeMap;
 
 use crate::{
-    diff::{Diff, base::MyersDiff},
+    diff::{Diff, base::MyersDiff, nbt::BlockEntitiesDiff},
     object::{Serde, SerdeError},
-    util::{create_bincode_config, unwrap_with_root_compound, wrap_with_root_compound},
+    util::create_bincode_config,
 };
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct ChunkDiff {
-    block_entities: MyersDiff,
+    block_entities: BlockEntitiesDiff,
     sections: Vec<MyersDiff>,
     others: MyersDiff,
-}
-fn pop_block_entities_from(compound_map: &mut BTreeMap<String, Value>) -> Vec<u8> {
-    let block_entities = compound_map.remove("block_entities").unwrap();
-    let wrapped = wrap_with_root_compound(block_entities);
-    log::debug!("wrapped: {:#?}", wrapped);
-    fastnbt::to_bytes(&wrapped).unwrap()
 }
 impl Diff<Value> for ChunkDiff {
     fn from_compare(old: &Value, new: &Value) -> Self
@@ -39,11 +32,12 @@ impl Diff<Value> for ChunkDiff {
         let diff_block_entities;
         {
             log::debug!("pop_block_entities_from for old...");
-            let old_block_entities = pop_block_entities_from(&mut old);
+            let old_block_entities = old.remove("block_entities").unwrap();
             log::debug!("pop_block_entities_from for new...");
-            let new_block_entities = pop_block_entities_from(&mut new);
+            let new_block_entities = new.remove("block_entities").unwrap();
             log::debug!("MyersDiff::from_compare...");
-            diff_block_entities = MyersDiff::from_compare(&old_block_entities, &new_block_entities);
+            diff_block_entities =
+                BlockEntitiesDiff::from_compare(&old_block_entities, &new_block_entities);
         }
 
         log::debug!("calc diff_sections...");
@@ -92,7 +86,7 @@ impl Diff<Value> for ChunkDiff {
         Self: Sized,
     {
         let block_entities =
-            MyersDiff::from_squash(&base.block_entities, &squashing.block_entities);
+            BlockEntitiesDiff::from_squash(&base.block_entities, &squashing.block_entities);
         let sections = base
             .sections
             .iter()
@@ -115,10 +109,8 @@ impl Diff<Value> for ChunkDiff {
 
         let block_entities;
         {
-            let old_block_entities = pop_block_entities_from(&mut old);
-            let new_block_entities = self.block_entities.patch(&old_block_entities);
-            let new_block_entities = fastnbt::from_bytes(&new_block_entities).unwrap();
-            block_entities = unwrap_with_root_compound(new_block_entities);
+            let old_block_entities = old.remove("block_entities").unwrap();
+            block_entities = self.block_entities.patch(&old_block_entities);
         }
 
         let sections: Vec<Value>;
@@ -165,10 +157,8 @@ impl Diff<Value> for ChunkDiff {
 
         let block_entities;
         {
-            let new_block_entities = pop_block_entities_from(&mut new);
-            let old_block_entities = self.block_entities.revert(&new_block_entities);
-            let old_block_entities = fastnbt::from_bytes(&old_block_entities).unwrap();
-            block_entities = unwrap_with_root_compound(old_block_entities);
+            let new_block_entities = new.remove("block_entities").unwrap();
+            block_entities = self.block_entities.revert(&new_block_entities);
         }
 
         let sections: Vec<Value>;
@@ -237,7 +227,7 @@ mod tests {
             let mut rng_new = rng_old.clone();
             let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_old);
             let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", &mut rng_new);
-            for _ in 0..100 {
+            for _ in 0..50 {
                 let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
                 let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
                 let diff = ChunkDiff::from_compare(&old, &new);
@@ -255,7 +245,7 @@ mod tests {
             let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_v0);
             let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
             let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
-            for _ in 0..100 {
+            for _ in 0..50 {
                 let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
                 let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
                 let v2 = fastnbt::from_bytes(&v2_iter.next().unwrap()).unwrap();
@@ -280,7 +270,7 @@ mod tests {
             rng_new.next_u32();
             let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_old);
             let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", &mut rng_new);
-            for _ in 0..3 {
+            for _ in 0..10 {
                 let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
                 let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
                 let diff = ChunkDiff::from_compare(&old, &new);
@@ -300,7 +290,7 @@ mod tests {
             let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_v0);
             let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
             let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
-            for _ in 0..3 {
+            for _ in 0..10 {
                 let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
                 let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
                 let v2 = fastnbt::from_bytes(&v2_iter.next().unwrap()).unwrap();

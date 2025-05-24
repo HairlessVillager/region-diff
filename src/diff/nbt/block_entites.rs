@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use bincode::{Decode, Encode};
 use fastnbt::Value;
 
 use crate::{
@@ -12,7 +13,7 @@ use crate::{
 };
 type XYZ = (i32, i32, i32);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encode, Decode)]
 enum BlockEntityDiff {
     Create(BlobDiff),
     Delete(BlobDiff),
@@ -20,7 +21,7 @@ enum BlockEntityDiff {
     UpdateDiffID(BlobDiff),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct BlockEntitiesDiff {
     old_xyz_list: Vec<XYZ>,
     new_xyz_list: Vec<XYZ>,
@@ -137,7 +138,93 @@ impl Diff<Value> for BlockEntitiesDiff {
     where
         Self: Sized,
     {
-        todo!()
+        let xyzs = BTreeSet::from_iter(
+            base.map
+                .keys()
+                .into_iter()
+                .chain(squashing.map.keys().into_iter()),
+        );
+        let map = BTreeMap::from_iter(xyzs.into_iter().filter_map(|xyz| {
+            let base_diff = base.map.get(xyz);
+            let squashing_diff = squashing.map.get(xyz);
+            let squashed = match (base_diff, squashing_diff) {
+                (None, None) => panic!("diff in {:?} not exists in both base and squash", xyz),
+                (None, Some(squashing_diff)) => Some(squashing_diff.clone()),
+                (Some(base_diff), None) => Some(base_diff.clone()),
+                (Some(base_diff), Some(squashing_diff)) => {
+                    match (base_diff, squashing_diff) {
+                        // Create xor Delete
+                        (BlockEntityDiff::Create(_), BlockEntityDiff::Delete(_)) => None,
+                        (BlockEntityDiff::Delete(base), BlockEntityDiff::Create(squashing)) => {
+                            Some(BlockEntityDiff::UpdateDiffID(BlobDiff::from_squash(
+                                base, squashing,
+                            )))
+                        }
+
+                        // Create then Update
+                        (BlockEntityDiff::Create(blob), BlockEntityDiff::UpdateSameID(myers)) => {
+                            Some(BlockEntityDiff::Create(BlobDiff::from_create(
+                                &myers.patch(blob.get_new_text()),
+                            )))
+                        }
+                        (BlockEntityDiff::Create(_), BlockEntityDiff::UpdateDiffID(blob)) => Some(
+                            BlockEntityDiff::Create(BlobDiff::from_create(blob.get_new_text())),
+                        ),
+
+                        // Update then Delete
+                        (BlockEntityDiff::UpdateSameID(myers), BlockEntityDiff::Delete(blob)) => {
+                            Some(BlockEntityDiff::Delete(BlobDiff::from_delete(
+                                &myers.revert(blob.get_old_text()),
+                            )))
+                        }
+                        (BlockEntityDiff::UpdateDiffID(blob), BlockEntityDiff::Delete(_)) => Some(
+                            BlockEntityDiff::Delete(BlobDiff::from_delete(blob.get_old_text())),
+                        ),
+
+                        // Updates in different type
+                        (
+                            BlockEntityDiff::UpdateSameID(myers),
+                            BlockEntityDiff::UpdateDiffID(blob),
+                        ) => Some(BlockEntityDiff::UpdateDiffID(BlobDiff::from_compare(
+                            &myers.revert(blob.get_old_text()),
+                            blob.get_new_text(),
+                        ))),
+                        (
+                            BlockEntityDiff::UpdateDiffID(blob),
+                            BlockEntityDiff::UpdateSameID(myers),
+                        ) => Some(BlockEntityDiff::UpdateDiffID(BlobDiff::from_compare(
+                            blob.get_old_text(),
+                            &myers.patch(blob.get_new_text()),
+                        ))),
+
+                        // Updates in same type
+                        (
+                            BlockEntityDiff::UpdateSameID(base),
+                            BlockEntityDiff::UpdateSameID(squashing),
+                        ) => Some(BlockEntityDiff::UpdateSameID(MyersDiff::from_squash(
+                            base, squashing,
+                        ))),
+                        (
+                            BlockEntityDiff::UpdateDiffID(base),
+                            BlockEntityDiff::UpdateDiffID(squashing),
+                        ) => Some(BlockEntityDiff::UpdateDiffID(BlobDiff::from_squash(
+                            base, squashing,
+                        ))),
+
+                        // panics
+                        _ => {
+                            panic!("mismatched base diff and squashing diff")
+                        }
+                    }
+                }
+            };
+            squashed.map(|diff| (xyz.clone(), diff))
+        }));
+        Self {
+            old_xyz_list: base.old_xyz_list.clone(),
+            new_xyz_list: squashing.new_xyz_list.clone(),
+            map,
+        }
     }
 
     fn patch(&self, old: &Value) -> Value {
@@ -220,5 +307,29 @@ mod tests {
         let reverted_new = diff.revert(&new);
         assert_eq!(patched_old, new);
         assert_eq!(reverted_new, old);
+    }
+
+    #[test]
+    fn test_diff_squash() {
+        let mut bes_list = [
+            "./resources/mca/r.1.2.20250514.mca",
+            "./resources/mca/r.1.2.20250515.mca",
+            "./resources/mca/r.1.2.20250516.mca",
+        ]
+        .map(|path| {
+            let chunk = get_test_chunk_by_xz(path, 25, 29);
+            let bes = get_block_entities_from_chunk(chunk);
+            Some(bes)
+        });
+        let v0 = bes_list[0].take().unwrap();
+        let v1 = bes_list[1].take().unwrap();
+        let v2 = bes_list[2].take().unwrap();
+        let diff_v01 = BlockEntitiesDiff::from_compare(&v0, &v1);
+        let diff_v12 = BlockEntitiesDiff::from_compare(&v1, &v2);
+        let squashed_diff = BlockEntitiesDiff::from_squash(&diff_v01, &diff_v12);
+        let patched_v0 = squashed_diff.patch(&v0);
+        let reverted_v2 = squashed_diff.revert(&v2);
+        assert_eq!(patched_v0, v2);
+        assert_eq!(reverted_v2, v0);
     }
 }
