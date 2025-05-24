@@ -13,6 +13,19 @@ pub fn create_bincode_config() -> bincode::config::Configuration<bincode::config
         .with_variable_int_encoding()
 }
 
+pub fn wrap_with_root_compound(value: fastnbt::Value) -> fastnbt::Value {
+    fastnbt::Value::Compound(std::collections::BTreeMap::from([(
+        "root".to_string(),
+        value,
+    )]))
+}
+pub fn unwrap_with_root_compound(value: fastnbt::Value) -> fastnbt::Value {
+    match value {
+        fastnbt::Value::Compound(mut map) => map.remove("root").unwrap(),
+        _ => panic!("root compound not exists"),
+    }
+}
+
 pub mod test {
     use fastnbt::Value;
     use rand::prelude::*;

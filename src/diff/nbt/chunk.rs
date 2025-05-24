@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::{
     diff::{Diff, base::MyersDiff},
     object::{Serde, SerdeError},
-    util::create_bincode_config,
+    util::{create_bincode_config, unwrap_with_root_compound, wrap_with_root_compound},
 };
 
 #[derive(Debug, Encode, Decode, Clone)]
@@ -13,15 +13,6 @@ pub struct ChunkDiff {
     block_entities: MyersDiff,
     sections: Vec<MyersDiff>,
     others: MyersDiff,
-}
-fn wrap_with_root_compound(value: Value) -> Value {
-    Value::Compound(BTreeMap::from([("root".to_string(), value)]))
-}
-fn unwrap_with_root_compound(value: Value) -> Value {
-    match value {
-        Value::Compound(mut map) => map.remove("root").unwrap(),
-        _ => panic!("root compound not exists"),
-    }
 }
 fn pop_block_entities_from(compound_map: &mut BTreeMap<String, Value>) -> Vec<u8> {
     let block_entities = compound_map.remove("block_entities").unwrap();
@@ -239,8 +230,6 @@ impl Serde for ChunkDiff {
 mod tests {
     use rand::prelude::*;
 
-    use crate::{mca::MCAReader, util::create_chunk_ixz_iter};
-
     use super::*;
     mod test_in_continuous_data {
         use fastnbt::Value;
@@ -279,7 +268,7 @@ mod tests {
             let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_v0);
             let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
             let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
-            for i in 0..100 {
+            for _ in 0..100 {
                 let v0 = v0_iter.next().unwrap();
                 let v1 = v1_iter.next().unwrap();
                 let v2 = v2_iter.next().unwrap();
