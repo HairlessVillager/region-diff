@@ -2,16 +2,19 @@ use crate::err::Error;
 
 mod rocksdb;
 
+// TODO: zero-copy implemention
 pub trait StorageBackend<'a> {
-    fn put<T>(&mut self, key: T, value: T) -> Result<(), Error>
+    fn put_batch<I, K, V>(&mut self, iter: I) -> Result<(), Error>
     where
-        T: AsRef<[u8]>;
+        I: Iterator<Item = (K, V)>,
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>;
 
-    fn get<T>(&self, key: T) -> Result<Vec<u8>, Error>
+    fn get<K>(&self, key: K) -> Result<Vec<u8>, Error>
     where
-        T: AsRef<[u8]>;
+        K: AsRef<[u8]>;
 
-    fn delete<T>(&self, key: T) -> Result<(), Error>
+    fn delete<K>(&self, key: K) -> Result<(), Error>
     where
-        T: AsRef<[u8]>;
+        K: AsRef<[u8]>;
 }

@@ -1,6 +1,7 @@
 use std::error::Error as StdError;
 use std::fmt::{self, Display, Formatter};
 
+// TODO: rewrite it with thiserror?
 #[derive(Debug)]
 pub struct Error {
     msg: String,

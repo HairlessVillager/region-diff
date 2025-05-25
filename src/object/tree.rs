@@ -24,7 +24,12 @@ fn walkdir_strip_prefix(root: &PathBuf) -> BTreeSet<PathBuf> {
     )
 }
 impl Tree {
-    pub fn from_compare(base_path: &PathBuf, working_path: &PathBuf) {
+    pub fn new() -> Self {
+        Self {
+            path2diff: BTreeMap::new(),
+        }
+    }
+    pub fn add_compare<T>(base_path: &PathBuf, working_path: &PathBuf) {
         let base = walkdir_strip_prefix(base_path);
         let working = walkdir_strip_prefix(working_path);
         for path in base.union(&working) {
