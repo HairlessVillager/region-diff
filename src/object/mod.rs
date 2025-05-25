@@ -1,7 +1,8 @@
+use blake2::{Blake2s256, Digest};
+
 pub mod commit;
-pub mod diff;
 pub mod tree;
-pub type ObjectHash = [u8; 32]; // 256 bits
+pub type ObjectHash = Vec<u8>; // 256 bits
 #[derive(Debug)]
 pub struct SerdeError {
     msg: String,
@@ -20,6 +21,9 @@ pub trait Serde {
     where
         Self: Sized;
 }
-pub trait Object: Serde {
-    fn hash(&self) -> ObjectHash;
+
+pub fn object_hash(data: &Vec<u8>) -> ObjectHash {
+    let mut hasher = Blake2s256::new();
+    hasher.update(data);
+    hasher.finalize().to_vec()
 }
