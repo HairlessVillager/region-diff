@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use bincode::{Decode, Encode};
+use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use fastnbt::Value;
 
 use crate::{
@@ -8,8 +8,8 @@ use crate::{
         Diff,
         base::{BlobDiff, MyersDiff},
     },
-    object::Serde,
-    util::{fastnbt_deserialize as de, fastnbt_serialize as ser},
+    object::{Serde, SerdeError},
+    util::{create_bincode_config, fastnbt_deserialize as de, fastnbt_serialize as ser},
 };
 type XYZ = (i32, i32, i32);
 
@@ -271,21 +271,27 @@ impl Diff<Value> for BlockEntitiesDiff {
 }
 impl Serde for BlockEntitiesDiff {
     fn serialize(&self) -> Result<Vec<u8>, crate::object::SerdeError> {
-        todo!()
+        encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))
     }
 
     fn deserialize(bytes: &Vec<u8>) -> Result<Self, crate::object::SerdeError>
     where
         Self: Sized,
     {
-        todo!()
+        let result: Result<(BlockEntitiesDiff, usize), _> =
+            decode_from_slice(bytes, create_bincode_config());
+        result
+            .map(|(diff, _)| diff)
+            .map_err(|e| SerdeError::from(e))
     }
 }
 #[cfg(test)]
 mod tests {
     use fastnbt::Value;
 
-    use crate::{diff::Diff, mca::ChunkWithTimestamp, util::test::get_test_chunk_by_xz};
+    use crate::{
+        diff::Diff, mca::ChunkWithTimestamp, object::Serde, util::test::get_test_chunk_by_xz,
+    };
 
     use super::BlockEntitiesDiff;
 
@@ -331,5 +337,18 @@ mod tests {
         let reverted_v2 = squashed_diff.revert(&v2);
         assert_eq!(patched_v0, v2);
         assert_eq!(reverted_v2, v0);
+    }
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let old_chunk = get_test_chunk_by_xz("./resources/mca/r.1.2.20250515.mca", 25, 29);
+        let old = get_block_entities_from_chunk(old_chunk);
+        let new_chunk = get_test_chunk_by_xz("./resources/mca/r.1.2.20250516.mca", 25, 29);
+        let new = get_block_entities_from_chunk(new_chunk);
+        let diff = BlockEntitiesDiff::from_compare(&old, &new);
+        let serialized = diff.serialize().unwrap();
+        let deserialized = BlockEntitiesDiff::deserialize(&serialized).unwrap();
+        let serialized2 = deserialized.serialize().unwrap();
+        assert_eq!(serialized, serialized2);
     }
 }

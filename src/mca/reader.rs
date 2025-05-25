@@ -1,6 +1,9 @@
-use super::SECTOR_SIZE;
+use crate::util::compress::{CompressionError, CompressionType};
+
+use super::{MCAFileParsingError, SECTOR_SIZE};
 
 use super::{ChunkWithTimestamp, HeaderEntry};
+use std::io;
 use std::{
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom},
@@ -19,7 +22,7 @@ pub struct MCAReader<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> MCAReader<R> {
-    fn from_reader(mut reader: R, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_reader(mut reader: R, lazy: bool) -> Result<Self, MCAFileParsingError> {
         let mut chunks = [const { LazyChunk::Unloaded }; 1024];
         let header = read_header(&mut reader)?;
 
@@ -36,17 +39,16 @@ impl<R: Read + Seek> MCAReader<R> {
                         let mut sector_buf =
                             vec![0u8; header_entry.sector_count as usize * SECTOR_SIZE];
                         reader.read_exact(&mut sector_buf).map_err(|e| {
-                            Box::new(std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                format!(
-                                    "Sector {} is out of bounds. Original error: {}",
-                                    header_entry.idx, e
-                                ),
+                            MCAFileParsingError::from_msg(format!(
+                                "Sector {} is out of bounds. Original error: {}",
+                                header_entry.idx, e
                             ))
                         })?;
                         LazyChunk::Some(ChunkWithTimestamp {
                             timestamp: header_entry.timestamp,
-                            nbt: read_chunk_nbt(&sector_buf)?,
+                            nbt: read_chunk_nbt(&sector_buf).map_err(|e| {
+                                MCAFileParsingError::from_msg_err("decompresstion error", e)
+                            })?,
                         })
                     }
                 }
@@ -63,7 +65,7 @@ impl<R: Read + Seek> MCAReader<R> {
         &mut self,
         x: usize,
         z: usize,
-    ) -> Result<Option<&ChunkWithTimestamp>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<&ChunkWithTimestamp>, MCAFileParsingError> {
         let idx = x + 32 * z;
 
         if let LazyChunk::Some(ref chunk) = self.chunks[idx] {
@@ -80,22 +82,26 @@ impl<R: Read + Seek> MCAReader<R> {
 
         let mut sector_buf = vec![0u8; header.sector_count as usize * SECTOR_SIZE];
         let offset = (header.sector_offset as u64) * (SECTOR_SIZE as u64);
-        self.mca_reader.seek(SeekFrom::Start(offset))?;
-        self.mca_reader.read_exact(&mut sector_buf)?;
+        self.mca_reader
+            .seek(SeekFrom::Start(offset))
+            .map_err(|e| MCAFileParsingError::from_msg_err("seek failed", e))?;
+        self.mca_reader
+            .read_exact(&mut sector_buf)
+            .map_err(|e| MCAFileParsingError::from_msg_err("read failed", e))?;
 
         let chunk = ChunkWithTimestamp {
             timestamp: header.timestamp,
-            nbt: read_chunk_nbt(&sector_buf)?,
+            nbt: read_chunk_nbt(&sector_buf)
+                .map_err(|e| MCAFileParsingError::from_msg_err("decompresstion failed", e))?,
         };
 
         self.chunks[idx] = LazyChunk::Some(chunk);
 
         match &self.chunks[idx] {
             LazyChunk::Some(chunk) => Ok(Some(chunk)),
-            _ => Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Failed to load chunk",
-            ))),
+            _ => Err(MCAFileParsingError::from_msg(
+                "Failed to load chunk".to_string(),
+            )),
         }
     }
     pub fn get_chunk_lazily(&self, x: usize, z: usize) -> &LazyChunk {
@@ -109,21 +115,20 @@ impl<R: Read + Seek> MCAReader<R> {
 }
 
 impl MCAReader<BufReader<File>> {
-    pub fn from_file(path: &str, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
-        let file = File::open(path)?;
+    pub fn from_file(path: &str, lazy: bool) -> Result<Self, MCAFileParsingError> {
+        let file = File::open(path)
+            .map_err(|e| MCAFileParsingError::from_msg_err("open file failed", e))?;
         let reader = BufReader::new(file);
         Self::from_reader(reader, lazy)
     }
 }
 impl<'a> MCAReader<Cursor<&'a [u8]>> {
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, MCAFileParsingError> {
         let reader = Cursor::new(bytes);
         Self::from_reader(reader, false)
     }
 }
-fn read_header<R: Read + Seek>(
-    reader: &mut R,
-) -> Result<[HeaderEntry; 1024], Box<dyn std::error::Error>> {
+fn read_header<R: Read + Seek>(reader: &mut R) -> Result<[HeaderEntry; 1024], MCAFileParsingError> {
     let mut headers = std::array::from_fn(|_| HeaderEntry {
         idx: 0,
         sector_offset: 0,
@@ -134,7 +139,9 @@ fn read_header<R: Read + Seek>(
     // read locations
     for (idx, _offset) in (0x0000..0x0fff).step_by(4).enumerate() {
         let mut buf = [0u8; 4];
-        reader.read_exact(&mut buf)?;
+        reader
+            .read_exact(&mut buf)
+            .map_err(|e| MCAFileParsingError::from_msg_err("read failed", e))?;
         let sector_offset = u32::from_be_bytes([0, buf[0], buf[1], buf[2]]);
         let sector_count = buf[3];
         headers[idx] = HeaderEntry {
@@ -148,7 +155,9 @@ fn read_header<R: Read + Seek>(
     // read timestamps
     for (idx, _offset) in (0x1000..0x1fff).step_by(4).enumerate() {
         let mut buf = [0u8; 4];
-        reader.read_exact(&mut buf)?;
+        reader
+            .read_exact(&mut buf)
+            .map_err(|e| MCAFileParsingError::from_msg_err("read failed", e))?;
         let timestamp = u32::from_be_bytes(buf);
         headers[idx].timestamp = timestamp;
     }
@@ -156,44 +165,14 @@ fn read_header<R: Read + Seek>(
     Ok(headers)
 }
 
-fn decompress_nbt(
-    data: &[u8],
-    compression_type: u8,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    match compression_type {
-        1 => {
-            let mut decoder = flate2::read::GzDecoder::new(data);
-            let mut decompressed = Vec::new();
-            decoder.read_to_end(&mut decompressed)?;
-            Ok(decompressed)
-        }
-        2 => {
-            let mut decoder = flate2::read::ZlibDecoder::new(data);
-            let mut decompressed = Vec::new();
-            decoder.read_to_end(&mut decompressed)?;
-            Ok(decompressed)
-        }
-        3 => Ok(data.to_vec()),
-        4 => {
-            let mut decompressed = Vec::new();
-            lz4_flex::block::decompress_into(data, &mut decompressed)?;
-            Ok(decompressed)
-        }
-        _ => Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Unsupported compression type: {}", compression_type),
-        ))),
-    }
-}
-
-fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, CompressionError> {
     let length =
         u32::from_be_bytes([sector_buf[0], sector_buf[1], sector_buf[2], sector_buf[3]]) as usize;
 
     let compression_type = sector_buf[4];
     let data = &sector_buf[5..length + 4];
 
-    let nbt = decompress_nbt(data, compression_type)?;
+    let nbt = CompressionType::from_magic(compression_type).decompress(data)?;
     Ok(nbt)
 }
 
@@ -204,7 +183,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn create_test_mca() -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    fn create_test_mca() -> Vec<u8> {
         let mut buffer = Vec::new();
         let mut file = Cursor::new(&mut buffer);
 
@@ -220,7 +199,7 @@ mod tests {
         header[4098] = 0;
         header[4099] = 1; // timestamp = 1
 
-        file.write_all(&header)?;
+        file.write_all(&header).unwrap();
 
         // create chunk data for first chunk (using zlib compression)
         let chunk_data = vec![1u8; 100]; // example NBT data
@@ -228,24 +207,25 @@ mod tests {
         {
             let mut encoder =
                 flate2::write::ZlibEncoder::new(&mut compressed, flate2::Compression::default());
-            encoder.write_all(&chunk_data)?;
-            encoder.finish()?;
+            encoder.write_all(&chunk_data).unwrap();
+            encoder.finish().unwrap();
         }
 
-        file.write_all(&((compressed.len() + 1) as u32).to_be_bytes())?; // write chunk length, +1 for compression type byte
-        file.write_all(&[2])?; // write compression type (2 = zlib)
-        file.write_all(&compressed)?; // write compressed data
+        file.write_all(&((compressed.len() + 1) as u32).to_be_bytes())
+            .unwrap(); // write chunk length, +1 for compression type byte
+        file.write_all(&[2]).unwrap(); // write compression type (2 = zlib)
+        file.write_all(&compressed).unwrap(); // write compressed data
 
         // padding to 4096 bytes (one sector)
         let padding = vec![0u8; SECTOR_SIZE - (compressed.len() + 4)];
-        file.write_all(&padding)?;
+        file.write_all(&padding).unwrap();
 
-        Ok(buffer)
+        buffer
     }
 
     #[test]
     fn test_header_reading() {
-        let mut mca = create_test_mca().unwrap();
+        let mut mca = create_test_mca();
         let mut reader = Cursor::new(&mut mca);
         let headers = read_header(&mut reader).unwrap();
 
@@ -262,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_mca_file_reading() {
-        let mut mca = create_test_mca().unwrap();
+        let mut mca = create_test_mca();
         let mca = MCAReader::from_bytes(&mut mca).unwrap();
 
         // test first chunk
@@ -301,7 +281,7 @@ mod tests {
         }
     }
     #[test]
-    fn test_fastnbt_works() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_fastnbt_works() {
         use fastnbt::{Value, nbt};
         let x = nbt!({
             "string": "Hello World",
@@ -318,12 +298,10 @@ mod tests {
             "long_array": [1_i64, 2_i64, 3_i64]
         });
 
-        let y = fastnbt::to_bytes(&x)?;
-        let z: Value = fastnbt::from_bytes(&y)?;
-        let w = fastnbt::to_bytes(&z)?;
+        let y = fastnbt::to_bytes(&x).unwrap();
+        let z: Value = fastnbt::from_bytes(&y).unwrap();
+        let w = fastnbt::to_bytes(&z).unwrap();
         assert_eq!(y, w);
         assert_eq!(format!("{:?}", x), format!("{:?}", z));
-
-        Ok(())
     }
 }

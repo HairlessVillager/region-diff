@@ -1,4 +1,5 @@
 pub mod diff;
+pub mod err;
 pub mod mca;
 pub mod object;
 pub mod util;

@@ -1,7 +1,5 @@
-use super::ChunkWithTimestamp;
-use super::CompressionType;
-use super::SECTOR_SIZE;
-use crate::util::create_chunk_ixz_iter;
+use super::{ChunkWithTimestamp, SECTOR_SIZE};
+use crate::util::{compress::CompressionType, create_chunk_ixz_iter};
 use std::io::Write;
 
 pub struct MCABuilder<'a> {
@@ -42,7 +40,7 @@ impl<'a> MCABuilder<'a> {
                 None => (0, 0, 0, None),
                 Some(chunk) => {
                     let sector_offset = buffer.len() / SECTOR_SIZE;
-                    let compressed_nbt = compress_nbt(&chunk.nbt, compression_type).unwrap();
+                    let compressed_nbt = compression_type.compress(&chunk.nbt).unwrap();
 
                     // `+ 5` for chunk data header (4 for length and 1 for compression type)
                     // `+ SECTOR_SIZE - 1` for align to SECTOR_SIZE
@@ -75,30 +73,6 @@ impl<'a> MCABuilder<'a> {
                 .copy_from_slice(&(timestamp as u32).to_be_bytes()[0..4]);
         }
         buffer
-    }
-}
-fn compress_nbt(
-    data: &[u8],
-    compression_type: CompressionType,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    match compression_type {
-        CompressionType::GZip => {
-            let mut encoder =
-                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-            encoder.write_all(data)?;
-            Ok(encoder.finish()?)
-        }
-        CompressionType::Zlib => {
-            let mut encoder =
-                flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-            encoder.write_all(data)?;
-            Ok(encoder.finish()?)
-        }
-        CompressionType::NoCompression => Ok(data.to_vec()),
-        CompressionType::LZ4 => {
-            let compressed = lz4_flex::block::compress_prepend_size(data);
-            Ok(compressed)
-        }
     }
 }
 

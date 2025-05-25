@@ -1,18 +1,19 @@
+use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use log::{Level, log_enabled};
 use std::time::{Duration, Instant};
 
 use crate::{
-    diff::{
-        Diff,
-        base::{BlobDiff, MyersDiff},
-        nbt::ChunkDiff,
-    },
-    mca::{ChunkWithTimestamp, CompressionType, LazyChunk, MCABuilder, MCAReader},
+    diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
+    mca::{ChunkWithTimestamp, LazyChunk, MCABuilder, MCAReader},
     object::{Serde, SerdeError},
-    util::{create_chunk_ixz_iter, fastnbt_deserialize as de, fastnbt_serialize as ser},
+    util::{
+        compress::{CompressionError, CompressionType},
+        create_bincode_config, create_chunk_ixz_iter, fastnbt_deserialize as de,
+        fastnbt_serialize as ser,
+    },
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encode, Decode)]
 enum ChunkWithTimestampDiff {
     BothNotExist,
     Create(i32, BlobDiff),
@@ -35,9 +36,9 @@ impl ChunkWithTimestampDiff {
         }
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct MCADiff {
-    chunks: [ChunkWithTimestampDiff; 1024],
+    chunks: Vec<ChunkWithTimestampDiff>,
 }
 
 impl Diff<Vec<u8>> for MCADiff {
@@ -54,7 +55,7 @@ impl Diff<Vec<u8>> for MCADiff {
             Vec::with_capacity(0)
         };
         log::debug!("from_compare()...");
-        let mut chunks = [const { ChunkWithTimestampDiff::BothNotExist }; 1024];
+        let mut chunks = vec![const { ChunkWithTimestampDiff::BothNotExist }; 1024];
         let mut timing_start = Instant::now();
         for (i, x, z) in create_chunk_ixz_iter() {
             // log::debug!("compare chunk i: {}", i);
@@ -141,7 +142,7 @@ impl Diff<Vec<u8>> for MCADiff {
     where
         Self: Sized,
     {
-        let mut squashed_chunks = [const { ChunkWithTimestampDiff::BothNotExist }; 1024];
+        let mut squashed_chunks = vec![const { ChunkWithTimestampDiff::BothNotExist }; 1024];
         for (i, _, _) in create_chunk_ixz_iter() {
             let chunk_diff_base = &base.chunks[i];
             let chunk_diff_squashing = &squashing.chunks[i];
@@ -360,27 +361,34 @@ impl Diff<Vec<u8>> for MCADiff {
 }
 impl Serde for MCADiff {
     fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
-        todo!()
+        let data = encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))?;
+        CompressionType::Zlib
+            .compress(&data)
+            .map_err(|_| SerdeError::new("failed to compress".to_string()))
     }
 
-    fn deserialize(bytes: &Vec<u8>) -> Result<Self, SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<MCADiff, SerdeError>
     where
         Self: Sized,
     {
-        todo!()
+        let bytes = CompressionType::Zlib
+            .decompress(&bytes)
+            .map_err(|_| SerdeError::new("failed to decompress".to_string()))?;
+        let result: Result<(MCADiff, usize), _> =
+            decode_from_slice(&bytes, create_bincode_config());
+        result
+            .map(|(diff, _)| diff)
+            .map_err(|e| SerdeError::new("err".to_string()))
     }
 }
 #[cfg(test)]
 mod tests {
-    use std::fs;
-
-    use fastnbt::Value;
     use rand::prelude::*;
 
     use super::*;
     use crate::{
         mca::{LazyChunk, MCAReader},
-        util::test::{build_test_mca_with_one_chunk, rearranged_nbt},
+        util::test::{build_test_mca, build_test_mca_with_one_chunk, rearranged_nbt},
     };
 
     #[test]
@@ -538,5 +546,27 @@ mod tests {
         let a = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250515.mca", 27, 26);
         let b = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250516.mca", 27, 26);
         MCADiff::from_compare(&a, &b);
+    }
+    #[test]
+    fn test_serialize_deserialize() {
+        let paths = [
+            "./resources/mca/r.1.2.20250511.mca",
+            "./resources/mca/r.1.2.20250512.mca",
+            "./resources/mca/r.1.2.20250513.mca",
+            "./resources/mca/r.1.2.20250514.mca",
+            "./resources/mca/r.1.2.20250515.mca",
+            "./resources/mca/r.1.2.20250516.mca",
+        ];
+        let seed = 114514;
+        let rng = StdRng::seed_from_u64(seed);
+        for path_old_new in paths.windows(2) {
+            let old = build_test_mca(path_old_new[0], 100, &mut rng.clone());
+            let new = build_test_mca(path_old_new[1], 100, &mut rng.clone());
+            let diff = MCADiff::from_compare(&old, &new);
+            let serialized = diff.serialize().unwrap();
+            let deserialized = MCADiff::deserialize(&serialized).unwrap();
+            let serialized2 = deserialized.serialize().unwrap();
+            assert_eq!(&serialized, &serialized2);
+        }
     }
 }
