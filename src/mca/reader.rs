@@ -1,9 +1,8 @@
-use crate::util::compress::{CompressionError, CompressionType};
+use crate::util::compress::CompressionType;
 
-use super::{MCAFileParsingError, SECTOR_SIZE};
+use super::{Error, SECTOR_SIZE};
 
 use super::{ChunkWithTimestamp, HeaderEntry};
-use std::io;
 use std::{
     fs::File,
     io::{BufReader, Cursor, Read, Seek, SeekFrom},
@@ -22,7 +21,7 @@ pub struct MCAReader<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> MCAReader<R> {
-    fn from_reader(mut reader: R, lazy: bool) -> Result<Self, MCAFileParsingError> {
+    fn from_reader(mut reader: R, lazy: bool) -> Result<Self, Error> {
         let mut chunks = [const { LazyChunk::Unloaded }; 1024];
         let header = read_header(&mut reader)?;
 
@@ -39,16 +38,15 @@ impl<R: Read + Seek> MCAReader<R> {
                         let mut sector_buf =
                             vec![0u8; header_entry.sector_count as usize * SECTOR_SIZE];
                         reader.read_exact(&mut sector_buf).map_err(|e| {
-                            MCAFileParsingError::from_msg(format!(
+                            Error::from(format!(
                                 "Sector {} is out of bounds. Original error: {}",
                                 header_entry.idx, e
                             ))
                         })?;
                         LazyChunk::Some(ChunkWithTimestamp {
                             timestamp: header_entry.timestamp,
-                            nbt: read_chunk_nbt(&sector_buf).map_err(|e| {
-                                MCAFileParsingError::from_msg_err("decompresstion error", e)
-                            })?,
+                            nbt: read_chunk_nbt(&sector_buf)
+                                .map_err(|e| Error::from_msg_err("decompresstion error", &e))?,
                         })
                     }
                 }
@@ -61,11 +59,7 @@ impl<R: Read + Seek> MCAReader<R> {
         })
     }
 
-    pub fn get_chunk(
-        &mut self,
-        x: usize,
-        z: usize,
-    ) -> Result<Option<&ChunkWithTimestamp>, MCAFileParsingError> {
+    pub fn get_chunk(&mut self, x: usize, z: usize) -> Result<Option<&ChunkWithTimestamp>, Error> {
         let idx = x + 32 * z;
 
         if let LazyChunk::Some(ref chunk) = self.chunks[idx] {
@@ -84,24 +78,22 @@ impl<R: Read + Seek> MCAReader<R> {
         let offset = (header.sector_offset as u64) * (SECTOR_SIZE as u64);
         self.mca_reader
             .seek(SeekFrom::Start(offset))
-            .map_err(|e| MCAFileParsingError::from_msg_err("seek failed", e))?;
+            .map_err(|e| Error::from_msg_err("seek failed", &e))?;
         self.mca_reader
             .read_exact(&mut sector_buf)
-            .map_err(|e| MCAFileParsingError::from_msg_err("read failed", e))?;
+            .map_err(|e| Error::from_msg_err("read failed", &e))?;
 
         let chunk = ChunkWithTimestamp {
             timestamp: header.timestamp,
             nbt: read_chunk_nbt(&sector_buf)
-                .map_err(|e| MCAFileParsingError::from_msg_err("decompresstion failed", e))?,
+                .map_err(|e| Error::from_msg_err("decompresstion failed", &e))?,
         };
 
         self.chunks[idx] = LazyChunk::Some(chunk);
 
         match &self.chunks[idx] {
             LazyChunk::Some(chunk) => Ok(Some(chunk)),
-            _ => Err(MCAFileParsingError::from_msg(
-                "Failed to load chunk".to_string(),
-            )),
+            _ => Err(Error::from("Failed to load chunk".to_string())),
         }
     }
     pub fn get_chunk_lazily(&self, x: usize, z: usize) -> &LazyChunk {
@@ -115,20 +107,19 @@ impl<R: Read + Seek> MCAReader<R> {
 }
 
 impl MCAReader<BufReader<File>> {
-    pub fn from_file(path: &str, lazy: bool) -> Result<Self, MCAFileParsingError> {
-        let file = File::open(path)
-            .map_err(|e| MCAFileParsingError::from_msg_err("open file failed", e))?;
+    pub fn from_file(path: &str, lazy: bool) -> Result<Self, Error> {
+        let file = File::open(path).map_err(|e| Error::from_msg_err("open file failed", &e))?;
         let reader = BufReader::new(file);
         Self::from_reader(reader, lazy)
     }
 }
 impl<'a> MCAReader<Cursor<&'a [u8]>> {
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, MCAFileParsingError> {
+    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Error> {
         let reader = Cursor::new(bytes);
         Self::from_reader(reader, false)
     }
 }
-fn read_header<R: Read + Seek>(reader: &mut R) -> Result<[HeaderEntry; 1024], MCAFileParsingError> {
+fn read_header<R: Read + Seek>(reader: &mut R) -> Result<[HeaderEntry; 1024], Error> {
     let mut headers = std::array::from_fn(|_| HeaderEntry {
         idx: 0,
         sector_offset: 0,
@@ -141,7 +132,7 @@ fn read_header<R: Read + Seek>(reader: &mut R) -> Result<[HeaderEntry; 1024], MC
         let mut buf = [0u8; 4];
         reader
             .read_exact(&mut buf)
-            .map_err(|e| MCAFileParsingError::from_msg_err("read failed", e))?;
+            .map_err(|e| Error::from_msg_err("read failed", &e))?;
         let sector_offset = u32::from_be_bytes([0, buf[0], buf[1], buf[2]]);
         let sector_count = buf[3];
         headers[idx] = HeaderEntry {
@@ -157,7 +148,7 @@ fn read_header<R: Read + Seek>(reader: &mut R) -> Result<[HeaderEntry; 1024], MC
         let mut buf = [0u8; 4];
         reader
             .read_exact(&mut buf)
-            .map_err(|e| MCAFileParsingError::from_msg_err("read failed", e))?;
+            .map_err(|e| Error::from_msg_err("read failed", &e))?;
         let timestamp = u32::from_be_bytes(buf);
         headers[idx].timestamp = timestamp;
     }
@@ -165,7 +156,7 @@ fn read_header<R: Read + Seek>(reader: &mut R) -> Result<[HeaderEntry; 1024], MC
     Ok(headers)
 }
 
-fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, CompressionError> {
+fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, Error> {
     let length =
         u32::from_be_bytes([sector_buf[0], sector_buf[1], sector_buf[2], sector_buf[3]]) as usize;
 

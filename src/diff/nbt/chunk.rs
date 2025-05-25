@@ -3,7 +3,8 @@ use fastnbt::Value;
 
 use crate::{
     diff::{Diff, base::MyersDiff, nbt::BlockEntitiesDiff},
-    object::{Serde, SerdeError},
+    err::Error,
+    object::Serde,
     util::create_bincode_config,
 };
 
@@ -199,11 +200,12 @@ impl Diff<Value> for ChunkDiff {
     }
 }
 impl Serde for ChunkDiff {
-    fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
-        encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))
+    fn serialize(&self) -> Result<Vec<u8>, Error> {
+        encode_to_vec(self, create_bincode_config())
+            .map_err(|e| Error::from_msg_err("failed to serialize ChunkDiff", &e))
     }
 
-    fn deserialize(bytes: &Vec<u8>) -> Result<Self, SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<Self, Error>
     where
         Self: Sized,
     {
@@ -211,7 +213,7 @@ impl Serde for ChunkDiff {
             decode_from_slice(bytes, create_bincode_config());
         result
             .map(|(diff, _)| diff)
-            .map_err(|e| SerdeError::from(e))
+            .map_err(|e| Error::from_msg_err("failed to deserialize to ChunkDiff", &e))
     }
 }
 #[cfg(test)]

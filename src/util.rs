@@ -128,19 +128,9 @@ pub mod test {
 pub mod compress {
     use std::io::{Read, Write};
 
-    #[derive(Debug)]
-    pub struct CompressionError {
-        msg: String,
-    }
-    impl CompressionError {
-        pub fn new(msg: String) -> Self {
-            Self { msg }
-        }
-        pub fn from<E: ToString>(err: E) -> Self {
-            Self::new(err.to_string())
-        }
-    }
-    #[derive(Clone, Copy)]
+    use crate::err::Error;
+
+    #[derive(Debug, Clone, Copy)]
     pub enum CompressionType {
         GZip,
         Zlib,
@@ -165,23 +155,27 @@ pub mod compress {
                 _ => panic!("unsupported compression type/magic"),
             }
         }
-        pub fn compress(&self, data: &Vec<u8>) -> Result<Vec<u8>, CompressionError> {
+        pub fn compress(&self, data: &Vec<u8>) -> Result<Vec<u8>, Error> {
             match self {
                 CompressionType::GZip => {
                     let mut encoder =
                         flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-                    encoder
-                        .write_all(data)
-                        .map_err(|e| CompressionError::from(e))?;
-                    Ok(encoder.finish().map_err(|e| CompressionError::from(e))?)
+                    encoder.write_all(data).map_err(|e| {
+                        Error::from_msg_err("failed to write data to GzEncoder", &e)
+                    })?;
+                    Ok(encoder.finish().map_err(|e| {
+                        Error::from_msg_err("failed to finish compression of GzEncoder", &e)
+                    })?)
                 }
                 CompressionType::Zlib => {
                     let mut encoder =
                         flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-                    encoder
-                        .write_all(data)
-                        .map_err(|e| CompressionError::from(e))?;
-                    Ok(encoder.finish().map_err(|e| CompressionError::from(e))?)
+                    encoder.write_all(data).map_err(|e| {
+                        Error::from_msg_err("failed to write data to ZlibEncoder", &e)
+                    })?;
+                    Ok(encoder.finish().map_err(|e| {
+                        Error::from_msg_err("failed to finish compression of ZlibEncoder", &e)
+                    })?)
                 }
                 CompressionType::NoCompression => Ok(data.to_vec()),
                 CompressionType::LZ4 => {
@@ -190,29 +184,29 @@ pub mod compress {
                 }
             }
         }
-        pub fn decompress(&self, data: &[u8]) -> Result<Vec<u8>, CompressionError> {
+        pub fn decompress(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
             match self {
                 CompressionType::GZip => {
                     let mut decoder = flate2::read::GzDecoder::new(data);
                     let mut decompressed = Vec::new();
-                    decoder
-                        .read_to_end(&mut decompressed)
-                        .map_err(|e| CompressionError::from(e))?;
+                    decoder.read_to_end(&mut decompressed).map_err(|e| {
+                        Error::from_msg_err("failed to decompress with GzDecoder", &e)
+                    })?;
                     Ok(decompressed)
                 }
                 CompressionType::Zlib => {
                     let mut decoder = flate2::read::ZlibDecoder::new(data);
                     let mut decompressed = Vec::new();
-                    decoder
-                        .read_to_end(&mut decompressed)
-                        .map_err(|e| CompressionError::from(e))?;
+                    decoder.read_to_end(&mut decompressed).map_err(|e| {
+                        Error::from_msg_err("failed to decompress with ZlibEncoder", &e)
+                    })?;
                     Ok(decompressed)
                 }
                 CompressionType::NoCompression => Ok(data.to_vec()),
                 CompressionType::LZ4 => {
                     let mut decompressed = Vec::new();
                     lz4_flex::block::decompress_into(data, &mut decompressed)
-                        .map_err(|e| CompressionError::from(e))?;
+                        .map_err(|e| Error::from_msg_err("failed to decompress with LZ4", &e))?;
                     Ok(decompressed)
                 }
             }

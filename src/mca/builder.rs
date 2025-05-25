@@ -1,6 +1,5 @@
 use super::{ChunkWithTimestamp, SECTOR_SIZE};
 use crate::util::{compress::CompressionType, create_chunk_ixz_iter};
-use std::io::Write;
 
 pub struct MCABuilder<'a> {
     chunks: [Option<&'a ChunkWithTimestamp>; 1024],

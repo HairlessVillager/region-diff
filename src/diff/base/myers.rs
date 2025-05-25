@@ -2,11 +2,7 @@ use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use similar::{Algorithm, DiffOp, capture_diff_slices};
 use std::io::{Cursor, Read, Seek};
 
-use crate::{
-    diff::Diff,
-    object::{Serde, SerdeError},
-    util::create_bincode_config,
-};
+use crate::{diff::Diff, err::Error, object::Serde, util::create_bincode_config};
 
 #[derive(Debug, Encode, Decode, PartialEq, Clone)]
 pub struct MyersDiff {
@@ -164,11 +160,12 @@ impl Diff<Vec<u8>> for MyersDiff {
 }
 
 impl Serde for MyersDiff {
-    fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
-        encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))
+    fn serialize(&self) -> Result<Vec<u8>, Error> {
+        encode_to_vec(self, create_bincode_config())
+            .map_err(|e| Error::from_msg_err("failed to serialize MyersDiff", &e))
     }
 
-    fn deserialize(bytes: &Vec<u8>) -> Result<Self, SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<Self, Error>
     where
         Self: Sized,
     {
@@ -176,7 +173,7 @@ impl Serde for MyersDiff {
             decode_from_slice(bytes, create_bincode_config());
         result
             .map(|(diff, _)| diff)
-            .map_err(|e| SerdeError::from(e))
+            .map_err(|e| Error::from_msg_err("failed to deserialize to MyersDiff", &e))
     }
 }
 

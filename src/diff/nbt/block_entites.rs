@@ -8,7 +8,8 @@ use crate::{
         Diff,
         base::{BlobDiff, MyersDiff},
     },
-    object::{Serde, SerdeError},
+    err::Error,
+    object::Serde,
     util::{create_bincode_config, fastnbt_deserialize as de, fastnbt_serialize as ser},
 };
 type XYZ = (i32, i32, i32);
@@ -270,11 +271,12 @@ impl Diff<Value> for BlockEntitiesDiff {
     }
 }
 impl Serde for BlockEntitiesDiff {
-    fn serialize(&self) -> Result<Vec<u8>, crate::object::SerdeError> {
-        encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))
+    fn serialize(&self) -> Result<Vec<u8>, Error> {
+        encode_to_vec(self, create_bincode_config())
+            .map_err(|e| Error::from_msg_err("failed to serialize BlockEntitiesDiff", &e))
     }
 
-    fn deserialize(bytes: &Vec<u8>) -> Result<Self, crate::object::SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<Self, Error>
     where
         Self: Sized,
     {
@@ -282,7 +284,7 @@ impl Serde for BlockEntitiesDiff {
             decode_from_slice(bytes, create_bincode_config());
         result
             .map(|(diff, _)| diff)
-            .map_err(|e| SerdeError::from(e))
+            .map_err(|e| Error::from_msg_err("failed to deserialize to BlockEntitiesDiff", &e))
     }
 }
 #[cfg(test)]

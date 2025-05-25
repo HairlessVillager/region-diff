@@ -4,12 +4,12 @@ use std::time::{Duration, Instant};
 
 use crate::{
     diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
+    err::Error,
     mca::{ChunkWithTimestamp, LazyChunk, MCABuilder, MCAReader},
-    object::{Serde, SerdeError},
+    object::Serde,
     util::{
-        compress::{CompressionError, CompressionType},
-        create_bincode_config, create_chunk_ixz_iter, fastnbt_deserialize as de,
-        fastnbt_serialize as ser,
+        compress::CompressionType, create_bincode_config, create_chunk_ixz_iter,
+        fastnbt_deserialize as de, fastnbt_serialize as ser,
     },
 };
 
@@ -360,25 +360,22 @@ impl Diff<Vec<u8>> for MCADiff {
     }
 }
 impl Serde for MCADiff {
-    fn serialize(&self) -> Result<Vec<u8>, SerdeError> {
-        let data = encode_to_vec(self, create_bincode_config()).map_err(|e| SerdeError::from(e))?;
-        CompressionType::Zlib
-            .compress(&data)
-            .map_err(|_| SerdeError::new("failed to compress".to_string()))
+    fn serialize(&self) -> Result<Vec<u8>, Error> {
+        let data = encode_to_vec(self, create_bincode_config())
+            .map_err(|e| Error::from_msg_err("failed to serialize MCADiff", &e))?;
+        CompressionType::Zlib.compress(&data)
     }
 
-    fn deserialize(bytes: &Vec<u8>) -> Result<MCADiff, SerdeError>
+    fn deserialize(bytes: &Vec<u8>) -> Result<MCADiff, Error>
     where
         Self: Sized,
     {
-        let bytes = CompressionType::Zlib
-            .decompress(&bytes)
-            .map_err(|_| SerdeError::new("failed to decompress".to_string()))?;
+        let bytes = CompressionType::Zlib.decompress(&bytes)?;
         let result: Result<(MCADiff, usize), _> =
             decode_from_slice(&bytes, create_bincode_config());
         result
             .map(|(diff, _)| diff)
-            .map_err(|e| SerdeError::new("err".to_string()))
+            .map_err(|e| Error::from_msg_err("failed to deserialize to MCADiff", &e))
     }
 }
 #[cfg(test)]
