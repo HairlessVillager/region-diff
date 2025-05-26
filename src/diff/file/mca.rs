@@ -1,15 +1,13 @@
-use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
+use bincode::{Decode, Encode};
 use log::{Level, log_enabled};
 use std::time::{Duration, Instant};
 
 use crate::{
     diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
-    err::Error,
     mca::{ChunkWithTimestamp, LazyChunk, MCABuilder, MCAReader},
-    object::Serde,
     util::{
-        compress::CompressionType, create_bincode_config, create_chunk_ixz_iter,
-        fastnbt_deserialize as de, fastnbt_serialize as ser,
+        compress::CompressionType, create_chunk_ixz_iter, fastnbt_deserialize as de,
+        fastnbt_serialize as ser,
     },
 };
 
@@ -359,25 +357,6 @@ impl Diff<Vec<u8>> for MCADiff {
         builder.to_bytes(CompressionType::Zlib)
     }
 }
-impl Serde for MCADiff {
-    fn serialize(&self) -> Result<Vec<u8>, Error> {
-        let data = encode_to_vec(self, create_bincode_config())
-            .map_err(|e| Error::from_msg_err("failed to serialize MCADiff", &e))?;
-        CompressionType::Zlib.compress(&data)
-    }
-
-    fn deserialize(bytes: &Vec<u8>) -> Result<MCADiff, Error>
-    where
-        Self: Sized,
-    {
-        let bytes = CompressionType::Zlib.decompress(&bytes)?;
-        let result: Result<(MCADiff, usize), _> =
-            decode_from_slice(&bytes, create_bincode_config());
-        result
-            .map(|(diff, _)| diff)
-            .map_err(|e| Error::from_msg_err("failed to deserialize to MCADiff", &e))
-    }
-}
 #[cfg(test)]
 mod tests {
     use rand::prelude::*;
@@ -385,7 +364,7 @@ mod tests {
     use super::*;
     use crate::{
         mca::{LazyChunk, MCAReader},
-        util::test::{build_test_mca, build_test_mca_with_one_chunk, rearranged_nbt},
+        util::test::{build_test_mca_with_one_chunk, rearranged_nbt},
     };
 
     #[test]
@@ -393,8 +372,8 @@ mod tests {
         // TODO: replace test mca files
         let reader_old = MCAReader::from_file("./resources/mca/r.1.2.20250511.mca", false).unwrap();
         let reader_new = MCAReader::from_file("./resources/mca/r.1.2.20250512.mca", false).unwrap();
-        let mut ts_changed_chunk_count = 0;
-        let mut ts_unchanged_chunk_count = 0;
+        let mut _ts_changed_chunk_count = 0;
+        let mut _ts_unchanged_chunk_count = 0;
         for (_, x, z) in create_chunk_ixz_iter() {
             let (timestamp_old, nbt_old) = match reader_old.get_chunk_lazily(x, z) {
                 LazyChunk::Some(chunk) => (chunk.timestamp, rearranged_nbt(&chunk.nbt).unwrap()),
@@ -405,10 +384,10 @@ mod tests {
                 _ => panic!("chunk should loaded"),
             };
             if timestamp_old == timestamp_new {
-                ts_unchanged_chunk_count += 1;
+                _ts_unchanged_chunk_count += 1;
                 assert_eq!(nbt_old, nbt_new);
             } else {
-                ts_changed_chunk_count += 1;
+                _ts_changed_chunk_count += 1;
                 assert_ne!(nbt_old, nbt_new);
             }
         }
@@ -543,27 +522,5 @@ mod tests {
         let a = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250515.mca", 27, 26);
         let b = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250516.mca", 27, 26);
         MCADiff::from_compare(&a, &b);
-    }
-    #[test]
-    fn test_serialize_deserialize() {
-        let paths = [
-            "./resources/mca/r.1.2.20250511.mca",
-            "./resources/mca/r.1.2.20250512.mca",
-            "./resources/mca/r.1.2.20250513.mca",
-            "./resources/mca/r.1.2.20250514.mca",
-            "./resources/mca/r.1.2.20250515.mca",
-            "./resources/mca/r.1.2.20250516.mca",
-        ];
-        let seed = 114514;
-        let rng = StdRng::seed_from_u64(seed);
-        for path_old_new in paths.windows(2) {
-            let old = build_test_mca(path_old_new[0], 100, &mut rng.clone());
-            let new = build_test_mca(path_old_new[1], 100, &mut rng.clone());
-            let diff = MCADiff::from_compare(&old, &new);
-            let serialized = diff.serialize().unwrap();
-            let deserialized = MCADiff::deserialize(&serialized).unwrap();
-            let serialized2 = deserialized.serialize().unwrap();
-            assert_eq!(&serialized, &serialized2);
-        }
     }
 }

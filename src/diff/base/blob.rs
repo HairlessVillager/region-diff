@@ -1,6 +1,6 @@
-use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
+use bincode::{Decode, Encode};
 
-use crate::{diff::Diff, err::Error, object::Serde, util::create_bincode_config};
+use crate::diff::Diff;
 
 // Blob is one kind of git object, another two: Tree, Commit.
 //
@@ -37,24 +37,6 @@ impl Diff<Vec<u8>> for BlobDiff {
         self.old_text.clone()
     }
 }
-impl Serde for BlobDiff {
-    fn serialize(&self) -> Result<Vec<u8>, Error> {
-        encode_to_vec(self, create_bincode_config())
-            .map_err(|e| Error::from_msg_err("failed to serialize BlobDiff", &e))
-    }
-
-    fn deserialize(bytes: &Vec<u8>) -> Result<Self, Error>
-    where
-        Self: Sized,
-    {
-        let result: Result<(BlobDiff, usize), _> =
-            decode_from_slice(bytes, create_bincode_config());
-        result
-            .map(|(diff, _)| diff)
-            .map_err(|e| Error::from_msg_err("failed to deserialize to BlobDiff", &e))
-    }
-}
-
 impl BlobDiff {
     pub fn new() -> Self {
         Self::from_compare(&Vec::with_capacity(0), &Vec::with_capacity(0))
@@ -121,21 +103,6 @@ mod tests {
             let reverted_v2 = squashed_diff.revert(&v2);
             assert_eq!(patched_v0, v2, "v0: {:?}; v1{:?}; v2: {:?}", v0, v1, v2);
             assert_eq!(reverted_v2, v0, "v0: {:?}; v1{:?}; v2: {:?}", v0, v1, v2);
-        }
-    }
-
-    #[test]
-    fn test_serialize_deserialize() {
-        let mut old_iter = create_test_bytes(114514);
-        let mut new_iter = create_test_bytes(1919810);
-        for _ in 0..100_000 {
-            let old = old_iter.next().unwrap();
-            let new = new_iter.next().unwrap();
-            let diff = BlobDiff::from_compare(&old, &new);
-            let serialized = diff.serialize().unwrap();
-            let deserialized = BlobDiff::deserialize(&serialized).unwrap();
-            assert_eq!(diff.old_text, deserialized.old_text);
-            assert_eq!(diff.new_text, deserialized.new_text);
         }
     }
 }

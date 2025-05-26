@@ -2,9 +2,9 @@ pub mod base;
 pub mod file;
 pub mod nbt;
 
-use crate::object::Serde;
+use bincode::{Decode, Encode};
 
-pub trait Diff<T>: Serde + Clone {
+pub trait Diff<T>: Encode + Decode<Self> + Clone {
     fn from_compare(old: &T, new: &T) -> Self
     where
         Self: Sized;

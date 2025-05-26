@@ -1,12 +1,7 @@
-use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
+use bincode::{Decode, Encode};
 use fastnbt::Value;
 
-use crate::{
-    diff::{Diff, base::MyersDiff, nbt::BlockEntitiesDiff},
-    err::Error,
-    object::Serde,
-    util::create_bincode_config,
-};
+use crate::diff::{Diff, base::MyersDiff, nbt::BlockEntitiesDiff};
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct ChunkDiff {
@@ -197,23 +192,6 @@ impl Diff<Value> for ChunkDiff {
         others.insert("block_entities".to_string(), block_entities);
 
         Value::Compound(others)
-    }
-}
-impl Serde for ChunkDiff {
-    fn serialize(&self) -> Result<Vec<u8>, Error> {
-        encode_to_vec(self, create_bincode_config())
-            .map_err(|e| Error::from_msg_err("failed to serialize ChunkDiff", &e))
-    }
-
-    fn deserialize(bytes: &Vec<u8>) -> Result<Self, Error>
-    where
-        Self: Sized,
-    {
-        let result: Result<(ChunkDiff, usize), _> =
-            decode_from_slice(bytes, create_bincode_config());
-        result
-            .map(|(diff, _)| diff)
-            .map_err(|e| Error::from_msg_err("failed to deserialize to ChunkDiff", &e))
     }
 }
 #[cfg(test)]
