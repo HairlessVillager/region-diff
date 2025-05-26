@@ -1,45 +1,44 @@
-use walkdir::WalkDir;
+use crate::storage::StorageBackend;
+use glob::Pattern as GlobPattern;
 
 use super::ObjectHash;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
-};
+use std::{collections::BTreeMap, path::PathBuf};
 type RelativeFilePath = PathBuf;
 
-pub struct Tree {
+pub struct Tree<S: StorageBackend> {
+    storage: S,
     path2diff: BTreeMap<RelativeFilePath, ObjectHash>,
 }
-fn walkdir_strip_prefix(root: &PathBuf) -> BTreeSet<PathBuf> {
-    BTreeSet::from_iter(
-        WalkDir::new(root)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file())
-            .map(|entry| {
-                let path = entry.path();
-                let relative_path = path.strip_prefix(root).unwrap_or(path);
-                relative_path.into()
-            }),
-    )
+
+pub struct TreeBuildItem {
+    pub(crate) path: PathBuf,
+    pub(crate) old: Option<Vec<u8>>,
+    pub(crate) new: Option<Vec<u8>>,
 }
-impl Tree {
-    pub fn new() -> Self {
-        Self {
-            path2diff: BTreeMap::new(),
-        }
-    }
-    pub fn add_compare<T>(base_path: &PathBuf, working_path: &PathBuf) {
-        let base = walkdir_strip_prefix(base_path);
-        let working = walkdir_strip_prefix(working_path);
-        for path in base.union(&working) {
-            match (base.contains(path), working.contains(path)) {
-                (true, true) => todo!(),
-                (true, false) => todo!(),
-                (false, true) => todo!(),
-                (false, false) => todo!(),
-            }
-        }
+
+struct Strategy {
+    pattern: StrategyPattern,
+    diff: StrategyDiff,
+}
+enum StrategyPattern {
+    Glob(GlobPattern),
+}
+enum StrategyDiff {
+    RegionDiff,
+    BlobDiff,
+}
+
+impl<S: StorageBackend> Tree<S> {
+    pub fn from_iter<I>(backend: &S, iter: &I) -> Self
+    where
+        I: Iterator<Item = TreeBuildItem>,
+    {
+        let strategies = vec![Strategy {
+            pattern: StrategyPattern::Glob(GlobPattern::new("**/*.mca").unwrap()),
+            diff: StrategyDiff::RegionDiff,
+        }];
+
+        todo!("write to backend")
     }
 }
 

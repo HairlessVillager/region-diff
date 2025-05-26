@@ -8,9 +8,9 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn from_msg_err<E: StdError>(msg: &str, err: &E) -> Self {
+    pub fn from_msg_err<M: ToString, E: StdError>(msg: M, err: &E) -> Self {
         Self {
-            msg: format!("{}: {}", msg, err),
+            msg: format!("{}: {}", msg.to_string(), err),
         }
     }
 }

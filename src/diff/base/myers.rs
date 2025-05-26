@@ -373,9 +373,63 @@ impl MyersDiff {
 
 #[cfg(test)]
 mod tests {
+    use similar::{Algorithm, DiffOp, capture_diff_slices};
+
     use crate::util::test::create_test_bytes;
 
     use super::*;
+
+    #[test]
+    fn test_similar_works() {
+        let a = vec![1, 2, 3];
+        let b = vec![3, 2, 1, 2];
+        let ops = capture_diff_slices(Algorithm::Myers, &a, &b);
+        for op in &ops {
+            match op {
+                DiffOp::Equal {
+                    old_index: _,
+                    new_index: _,
+                    len: _,
+                } => (),
+                DiffOp::Insert {
+                    old_index: _,
+                    new_index: _,
+                    new_len: _,
+                } => (),
+                DiffOp::Delete {
+                    old_index: _,
+                    old_len: _,
+                    new_index: _,
+                } => (),
+                DiffOp::Replace {
+                    old_index: _,
+                    old_len: _,
+                    new_index: _,
+                    new_len: _,
+                } => (),
+            }
+        }
+        assert_eq!(
+            &ops,
+            &vec![
+                DiffOp::Insert {
+                    old_index: 0,
+                    new_index: 0,
+                    new_len: 2
+                },
+                DiffOp::Equal {
+                    old_index: 0,
+                    new_index: 2,
+                    len: 2
+                },
+                DiffOp::Delete {
+                    old_index: 2,
+                    old_len: 1,
+                    new_index: 4
+                },
+            ]
+        );
+    }
 
     #[test]
     fn test_diff_patch_revert() -> () {

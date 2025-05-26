@@ -2,8 +2,10 @@ use crate::err::Error;
 
 mod rocksdb;
 
+pub use rocksdb::RocksDB;
+
 // TODO: zero-copy implemention
-pub trait StorageBackend<'a> {
+pub trait StorageBackend {
     fn put_batch<I, K, V>(&mut self, iter: I) -> Result<(), Error>
     where
         I: Iterator<Item = (K, V)>,
