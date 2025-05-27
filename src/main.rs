@@ -1,15 +1,14 @@
+use clap::{Parser, Subcommand};
+
 mod commands;
 mod config;
 mod diff;
 mod err;
+mod log;
 mod mca;
 mod object;
 mod storage;
 mod util;
-
-use std::path::PathBuf;
-
-use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

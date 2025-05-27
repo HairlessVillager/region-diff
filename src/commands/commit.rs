@@ -1,4 +1,8 @@
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::PathBuf,
+};
 
 use walkdir::WalkDir;
 
@@ -6,10 +10,11 @@ use crate::{
     config::Config,
     object::tree::{Tree, TreeBuildItem},
     storage::StorageBackend,
+    util::merge_map,
 };
 
-fn walkdir_strip_prefix(root: &PathBuf) -> BTreeSet<PathBuf> {
-    BTreeSet::from_iter(
+fn walkdir_strip_prefix(root: &PathBuf) -> BTreeMap<PathBuf, PathBuf> {
+    BTreeMap::from_iter(
         WalkDir::new(root)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -17,46 +22,47 @@ fn walkdir_strip_prefix(root: &PathBuf) -> BTreeSet<PathBuf> {
             .map(|entry| {
                 let path = entry.path();
                 let relative_path = path.strip_prefix(root).unwrap_or(path);
-                relative_path.into()
+                (relative_path.into(), path.into())
             }),
     )
 }
 
-pub fn commit<S: StorageBackend>(config: &Config<S>, message: &str) {
+pub fn commit<S: StorageBackend>(mut config: Config<S>, message: &str) {
     let base = walkdir_strip_prefix(&config.base_dir);
     let working = walkdir_strip_prefix(&config.working_dir);
-    let iter = base.union(&working).map(|path| {
-        let f = |set: &BTreeSet<PathBuf>| {
-            if set.contains(path) {
-                fs::read(path).map(|c| Some(c)).expect(&format!(
-                    "file {} exists but failed to read",
-                    path.to_str().unwrap()
-                ))
-            } else {
-                None
-            }
-        };
-        TreeBuildItem {
-            path: path.to_path_buf(),
-            old: f(&base),
-            new: f(&working),
-        }
-    });
-    Tree::<S>::from_iter(&config.backend, &iter);
-    todo!()
+    let base_working = merge_map(base, working);
+    let build_items = base_working
+        .into_iter()
+        .map(|(rela, (abs_base, abs_working))| TreeBuildItem {
+            path: rela.to_path_buf(),
+            old: abs_base.map(|path| {
+                fs::read(&path).expect(&format!("file {:?} exists but failed to read", &path))
+            }),
+            new: abs_working.map(|path| {
+                fs::read(&path).expect(&format!("file {:?} exists but failed to read", &path))
+            }),
+        });
+    Tree::from_iter(&mut config.backend, build_items);
+    todo!("write tree object to storage backend");
+    todo!("write commit object to storage backend");
 }
 
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
 
-    use crate::storage::RocksDB;
+    use crate::{log::init as init_log, storage::RocksDB};
 
     use super::*;
 
     #[test]
-    #[ignore]
+    #[ignore = "todo: write tree object to storage backend; write commit object to storage backend"]
     fn test_commit() {
+        init_log(crate::log::Config::Development).unwrap();
+
+        log::debug!("test commit...");
+        println!("test commit...");
+
         let temp_dir = tempdir().expect("Failed to create temp directory");
         let db_path = temp_dir.path();
 
@@ -65,7 +71,8 @@ mod tests {
             base_dir: PathBuf::from("./resources/save/20250511"),
             working_dir: PathBuf::from("./resources/save/20250512"),
         };
-        commit(&config, "test commit");
+        commit(config, "test commit");
+
         temp_dir.close().expect("Failed to clean up temp directory");
     }
 }

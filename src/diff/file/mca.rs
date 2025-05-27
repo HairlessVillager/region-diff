@@ -56,7 +56,7 @@ impl Diff<Vec<u8>> for MCADiff {
         let mut chunks = vec![const { ChunkWithTimestampDiff::BothNotExist }; 1024];
         let mut timing_start = Instant::now();
         for (i, x, z) in create_chunk_ixz_iter() {
-            // log::debug!("compare chunk i: {}", i);
+            log::debug!("compare chunk i: {}", i);
             if log_enabled!(Level::Info) {
                 timing_start = Instant::now();
             }
@@ -115,7 +115,7 @@ impl Diff<Vec<u8>> for MCADiff {
         if enable_cost_stat {
             chunk_costs.sort_by(|a, b| b.0.cmp(&a.0));
             let total_cost = chunk_costs.iter().map(|(d, _, _, _)| d).sum::<Duration>();
-            log::info!(
+            log::debug!(
                 "chunk time costs stat:\n- total {:?}\n- avg   {:?}\n- p100  {:?}\n- p99   {:?}\n- p95   {:?}\n- p50   {:?}",
                 total_cost,
                 total_cost / 1024,

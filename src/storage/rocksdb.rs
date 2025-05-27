@@ -1,4 +1,7 @@
+use hex::encode as hex;
 use rocksdb::{DB, Options, WriteBatch};
+use similar::DiffableStr;
+
 use std::path::Path;
 
 use crate::err::Error;
@@ -28,8 +31,10 @@ impl StorageBackend for RocksDB {
     {
         let mut batch = WriteBatch::default();
         for (key, value) in iter {
+            log::debug!("put key {} to batch", hex(&key));
             batch.put(key.as_ref(), value.as_ref());
         }
+        log::debug!("write batch to rocksdb");
         self.db
             .write(batch)
             .map_err(|e| Error::from_msg_err("failed to write batch to RocksDB", &e))?;
