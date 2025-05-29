@@ -1,5 +1,8 @@
 use bincode::{Decode, Encode};
 use log::{Level, log_enabled};
+use rayon::{ThreadPoolBuilder, prelude::*};
+
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::{
@@ -44,32 +47,39 @@ impl Diff<Vec<u8>> for MCADiff {
     where
         Self: Sized,
     {
-        let reader_old = MCAReader::from_bytes(old).unwrap();
-        let reader_new = MCAReader::from_bytes(new).unwrap();
-        let enable_cost_stat = log_enabled!(Level::Info);
-        let mut chunk_costs = if enable_cost_stat {
-            Vec::with_capacity(1024)
-        } else {
-            Vec::with_capacity(0)
-        };
         log::debug!("from_compare()...");
-        let mut chunks = vec![const { ChunkWithTimestampDiff::BothNotExist }; 1024];
-        let mut timing_start = Instant::now();
-        for (i, x, z) in create_chunk_ixz_iter() {
-            log::trace!("compare chunk i: {}", i);
-            if log_enabled!(Level::Info) {
-                timing_start = Instant::now();
-            }
 
-            let old_ts = reader_old.get_timestamp(x, z);
-            let new_ts = reader_new.get_timestamp(x, z);
+        let reader_old = Arc::new(MCAReader::from_bytes(old).unwrap());
+        let reader_new = Arc::new(MCAReader::from_bytes(new).unwrap());
+        let enable_cost_stat = log_enabled!(Level::Info);
+
+        let mut chunks = vec![ChunkWithTimestampDiff::BothNotExist; 1024];
+        let ixz_list = create_chunk_ixz_iter().collect::<Vec<_>>(); // shuffle may helpful or helpless
+
+        let num_threads = 8;
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build()
+            .unwrap();
+
+        let process_chunk = |(i, x, z): &(usize, usize, usize)| {
+            log::trace!("compare chunk i: {}", i);
+            let timing_start = if enable_cost_stat {
+                Some(Instant::now())
+            } else {
+                None
+            };
+
+            let old_ts = reader_old.get_timestamp(*x, *z);
+            let new_ts = reader_new.get_timestamp(*x, *z);
             let ts_diff = new_ts as i32 - old_ts as i32;
+
             let chunk = match (old_ts, new_ts, ts_diff) {
                 (0, 0, _) => ChunkWithTimestampDiff::BothNotExist,
                 (_, _, 0) => ChunkWithTimestampDiff::NoChange,
                 _ => {
-                    let old = reader_old.get_chunk_lazily(x, z);
-                    let new = reader_new.get_chunk_lazily(x, z);
+                    let old = reader_old.get_chunk_lazily(*x, *z);
+                    let new = reader_new.get_chunk_lazily(*x, *z);
                     match (old, new) {
                         (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
                         (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
@@ -105,16 +115,32 @@ impl Diff<Vec<u8>> for MCADiff {
                     }
                 }
             };
-            chunks[i] = chunk;
 
-            if enable_cost_stat {
-                let timing_duration = timing_start.elapsed();
-                chunk_costs.push((timing_duration, i, x, z));
-            }
+            let cost = timing_start.map(|s| s.elapsed());
+            (*i, chunk, cost, *x, *z)
+        };
+
+        let mut results: Vec<_> = vec![];
+        pool.install(|| {
+            results = ixz_list.par_iter().map(process_chunk).collect();
+        });
+
+        let mut chunk_costs = if enable_cost_stat {
+            results
+                .iter()
+                .filter_map(|&(i, _, cost, x, z)| cost.map(|c| (c, i, x, z)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        for (i, chunk, _, _, _) in results {
+            chunks[i] = chunk;
         }
+
         if enable_cost_stat {
             chunk_costs.sort_by(|a, b| b.0.cmp(&a.0));
-            let total_cost = chunk_costs.iter().map(|(d, _, _, _)| d).sum::<Duration>();
+            let total_cost = chunk_costs.iter().map(|(d, _, _, _)| *d).sum::<Duration>();
             log::debug!(
                 "chunk time costs stat:\n- total {:?}\n- avg   {:?}\n- p100  {:?}\n- p99   {:?}\n- p95   {:?}\n- p50   {:?}",
                 total_cost,
@@ -133,6 +159,7 @@ impl Diff<Vec<u8>> for MCADiff {
                     .join("\n")
             );
         }
+
         Self { chunks }
     }
 
