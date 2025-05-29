@@ -182,7 +182,7 @@ impl Log for DevelopmentLogger {
 
     fn log(&self, record: &Record) {
         let level = map_level_to_str(record.level());
-        let ts = chrono::Utc::now().format("%H:%M:%S%.6fZ").to_string();
+        let ts = chrono::Utc::now().format("%H:%M:%S%.6f").to_string();
 
         let mut writer = self.writer.lock().unwrap();
         writeln!(

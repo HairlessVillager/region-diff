@@ -11,7 +11,7 @@ pub struct RocksDB {
     clear_when_drop: bool,
     path_buf: PathBuf,
     opts: Options,
-    db: DB,
+    db: Option<DB>,
 }
 
 impl RocksDB {
@@ -25,7 +25,7 @@ impl RocksDB {
             clear_when_drop: false,
             path_buf,
             opts,
-            db,
+            db: Some(db),
         })
     }
     pub fn new_temp<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
@@ -38,7 +38,7 @@ impl RocksDB {
             clear_when_drop: true,
             path_buf,
             opts,
-            db,
+            db: Some(db),
         })
     }
 }
@@ -46,6 +46,8 @@ impl RocksDB {
 impl Drop for RocksDB {
     fn drop(&mut self) {
         if self.clear_when_drop {
+            let db = self.db.take();
+            drop(db);
             let _ = DB::destroy(&self.opts, &self.path_buf)
                 .map_err(|e| log::warn!("failed to destory RocksDB: {e}"));
         }
@@ -61,22 +63,34 @@ impl StorageBackend for RocksDB {
     {
         let mut batch = WriteBatch::default();
         for (key, value) in iter {
-            log::debug!("put key {} to batch", hex(&key));
+            log::trace!("put key {} to batch", hex(&key));
             batch.put(key.as_ref(), value.as_ref());
         }
-        log::debug!("write batch to rocksdb");
-        self.db
-            .write(batch)
+        log::trace!("write batch to rocksdb");
+        let db = self.db.as_mut().unwrap();
+        db.write(batch)
             .map_err(|e| Error::from_msg_err("failed to write batch to RocksDB", &e))?;
         Ok(())
+    }
+
+    fn put<K, V>(&mut self, key: K, value: V) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        log::trace!("put key {} directly", hex(&key));
+        let db = self.db.as_mut().unwrap();
+        db.put(key, value)
+            .map_err(|e| Error::from_msg_err("failed to write batch to RocksDB", &e))
     }
 
     fn get<K>(&self, key: K) -> Result<Vec<u8>, Error>
     where
         K: AsRef<[u8]>,
     {
-        let res = self
-            .db
+        log::trace!("get key {}", hex(&key));
+        let db = self.db.as_ref().unwrap();
+        let res = db
             .get(key.as_ref())
             .map_err(|e| Error::from_msg_err("failed to get in RocksDB", &e))?;
         match res {
@@ -92,8 +106,9 @@ impl StorageBackend for RocksDB {
     where
         K: AsRef<[u8]>,
     {
-        self.db
-            .delete(key.as_ref())
+        log::trace!("delete key {}", hex(&key));
+        let db = self.db.as_mut().unwrap();
+        db.delete(key.as_ref())
             .map_err(|e| Error::from_msg_err("failed to delete in RocksDB", &e))?;
         Ok(())
     }
@@ -162,9 +177,7 @@ mod tests {
 
         let mut storage = RocksDB::new_temp(db_path).unwrap();
 
-        storage
-            .put_batch(vec![(b"key1", b"value1")].into_iter())
-            .unwrap();
+        storage.put(b"key1", b"value1").unwrap();
         let value1 = storage.get(b"key1").unwrap();
         assert_eq!(value1, b"value1");
 
@@ -189,7 +202,5 @@ mod tests {
         }
 
         drop(storage);
-
-        temp_dir.close().expect("Failed to clean up temp directory");
     }
 }

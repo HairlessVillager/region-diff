@@ -1,9 +1,23 @@
-use super::ObjectHash;
+use super::{Object, ObjectHash};
+use bincode::{Decode, Encode};
 
-struct Commit {
-    upstreams: Vec<ObjectHash>,
+#[derive(Debug, Encode, Decode)]
+pub struct Commit {
+    parents: Vec<ObjectHash>,
     tree: ObjectHash,
-    metadata: CommitMetadata,
+    message: String,
+    timestamp: String,
 }
 
-struct CommitMetadata {}
+impl Object for Commit {}
+
+impl Commit {
+    pub fn from(parents: Option<&Vec<ObjectHash>>, tree: &ObjectHash, message: &str) -> Self {
+        Self {
+            parents: parents.map(|x| x.clone()).unwrap_or(Vec::new()),
+            tree: tree.clone(),
+            message: message.to_string(),
+            timestamp: chrono::Utc::now().format("%H:%M:%S%.6f").to_string(),
+        }
+    }
+}

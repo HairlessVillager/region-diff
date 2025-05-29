@@ -29,6 +29,17 @@ impl StorageBackend for Memory {
         Ok(())
     }
 
+    fn put<K, V>(&mut self, key: K, value: V) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        let key_bytes = key.as_ref().to_vec();
+        let value_bytes = value.as_ref().to_vec();
+        self.map.insert(key_bytes, value_bytes);
+        Ok(())
+    }
+
     fn get<K>(&self, key: K) -> Result<Vec<u8>, Error>
     where
         K: AsRef<[u8]>,
@@ -60,9 +71,7 @@ mod tests {
     fn test_memory_storage() {
         let mut storage = Memory::new();
 
-        storage
-            .put_batch(vec![(b"key1", b"value1")].into_iter())
-            .unwrap();
+        storage.put(b"key1", b"value1").unwrap();
         assert_eq!(storage.get(b"key1").unwrap(), b"value1");
 
         storage

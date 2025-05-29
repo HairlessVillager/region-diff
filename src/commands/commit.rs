@@ -4,9 +4,9 @@ use walkdir::WalkDir;
 
 use crate::{
     config::get_config,
-    object::tree::{Tree, TreeBuildItem},
-    storage::create_storage_backend,
-    util::merge_map,
+    object::{Commit, Object, Tree, TreeBuildItem},
+    storage::{StorageBackend, create_storage_backend},
+    util::{merge_map, put_object},
 };
 
 fn walkdir_strip_prefix(root: &PathBuf) -> BTreeMap<PathBuf, PathBuf> {
@@ -41,9 +41,16 @@ pub fn commit(message: &str) {
                 fs::read(&path).expect(&format!("file {:?} exists but failed to read", &path))
             }),
         });
-    Tree::from_iter(&mut backend, build_items);
-    todo!("write tree object to storage backend");
-    todo!("write commit object to storage backend");
+
+    let tree = Tree::from_iter(&mut backend, build_items);
+    let (key, value) = tree.as_kv();
+    backend.put(&key, &value).unwrap();
+
+    let commit = Commit::from(None, &key, message);
+    let (key, value) = commit.as_kv();
+    backend.put(&key, &value).unwrap();
+
+    todo!("write commit to index");
 }
 
 #[cfg(test)]
@@ -53,10 +60,10 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "todo: write tree object to storage backend; write commit object to storage backend"]
+    #[ignore = "todo: write commit to index"]
     fn test_commit() {
         init_config(Config {
-            backend_url: "memory://".to_string(),
+            backend_url: "tempdir://".to_string(),
             base_dir: PathBuf::from("./resources/save/20250511"),
             working_dir: PathBuf::from("./resources/save/20250512"),
             log_config: crate::config::LogConfig::Development,

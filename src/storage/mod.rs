@@ -1,17 +1,23 @@
-use crate::err::Error;
+use hex::encode as hex;
+use url::Url;
 
 mod mem;
 mod rocksdb;
 
+use crate::err::Error;
 pub use mem::Memory;
 pub use rocksdb::RocksDB;
-use url::Url;
 
 // TODO: zero-copy implemention
 pub trait StorageBackend {
     fn put_batch<I, K, V>(&mut self, iter: I) -> Result<(), Error>
     where
         I: Iterator<Item = (K, V)>,
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>;
+
+    fn put<K, V>(&mut self, key: K, value: V) -> Result<(), Error>
+    where
         K: AsRef<[u8]>,
         V: AsRef<[u8]>;
 
@@ -37,7 +43,6 @@ pub fn create_storage_backend(url: &str) -> WrappedStorageBackend {
 
         #[cfg(test)]
         "tempdir" => {
-            log::warn!("the tempdir will not be auto-deleted");
             let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
             let db_path = temp_dir.path();
             WrappedStorageBackend::RocksDB(RocksDB::new_temp(db_path).unwrap())
@@ -53,9 +58,22 @@ impl StorageBackend for WrappedStorageBackend {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
+        log::debug!("put batch to storage backend");
         match self {
             Self::Memory(x) => x.put_batch(iter),
             Self::RocksDB(x) => x.put_batch(iter),
+        }
+    }
+
+    fn put<K, V>(&mut self, key: K, value: V) -> Result<(), Error>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        log::debug!("put {} to storage backend", &hex(&key)[..8]);
+        match self {
+            Self::Memory(x) => x.put(key, value),
+            Self::RocksDB(x) => x.put(key, value),
         }
     }
 
@@ -63,6 +81,7 @@ impl StorageBackend for WrappedStorageBackend {
     where
         K: AsRef<[u8]>,
     {
+        log::debug!("get {} from storage backend", &hex(&key)[..8]);
         match self {
             Self::Memory(x) => x.get(key),
             Self::RocksDB(x) => x.get(key),
@@ -73,6 +92,7 @@ impl StorageBackend for WrappedStorageBackend {
     where
         K: AsRef<[u8]>,
     {
+        log::debug!("delete {} from storage backend", &hex(&key)[..8]);
         match self {
             Self::Memory(x) => x.delete(key),
             Self::RocksDB(x) => x.delete(key),

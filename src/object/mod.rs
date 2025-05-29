@@ -3,9 +3,13 @@ use blake2::{Blake2s256, Digest};
 
 use crate::util::create_bincode_config;
 
-pub mod commit;
-pub mod diff;
-pub mod tree;
+mod commit;
+mod diff;
+mod tree;
+
+pub use commit::Commit;
+pub use diff::Diff;
+pub use tree::{Tree, TreeBuildItem};
 
 pub type ObjectHash = Vec<u8>; // 256 bits
 
@@ -15,7 +19,7 @@ fn object_hash(data: &Vec<u8>) -> ObjectHash {
     hasher.finalize().to_vec()
 }
 
-trait Object: Encode + Decode<()> {
+pub trait Object: Encode + Decode<()> {
     fn serialize(&self) -> Vec<u8> {
         encode_to_vec(self, create_bincode_config()).unwrap()
     }

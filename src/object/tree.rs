@@ -18,6 +18,8 @@ pub struct Tree {
     path2diff: BTreeMap<RelativeFilePath, ObjectHash>,
 }
 
+impl Object for Tree {}
+
 #[derive(Debug, Encode, Decode)]
 pub struct TreeBuildItem {
     pub(crate) path: PathBuf,

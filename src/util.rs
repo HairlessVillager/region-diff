@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::{err::Error, object::Object, storage::StorageBackend};
+
 pub fn create_chunk_ixz_iter() -> impl Iterator<Item = (usize, usize, usize)> {
     (0..32).flat_map(|z| {
         (0..32).map(move |x| {
@@ -26,6 +28,11 @@ pub fn unwrap_with_root_compound(value: fastnbt::Value) -> fastnbt::Value {
         fastnbt::Value::Compound(mut map) => map.remove("root").unwrap(),
         _ => panic!("root compound not exists"),
     }
+}
+
+pub fn put_object<S: StorageBackend, O: Object>(backend: &mut S, obj: &O) -> Result<(), Error> {
+    let (key, value) = obj.as_kv();
+    backend.put(key, value)
 }
 
 pub fn fastnbt_serialize(v: &fastnbt::Value) -> Vec<u8> {

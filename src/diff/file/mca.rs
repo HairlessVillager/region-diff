@@ -56,7 +56,7 @@ impl Diff<Vec<u8>> for MCADiff {
         let mut chunks = vec![ChunkWithTimestampDiff::BothNotExist; 1024];
         let ixz_list = create_chunk_ixz_iter().collect::<Vec<_>>(); // shuffle may helpful or helpless
 
-        let num_threads = 8;
+        let num_threads = 8; // TODO: configuable
         let pool = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .build()
