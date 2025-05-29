@@ -51,7 +51,10 @@ pub fn commit<S: StorageBackend>(mut config: Config<S>, message: &str) {
 mod tests {
     use tempfile::tempdir;
 
-    use crate::{log::init as init_log, storage::RocksDB};
+    use crate::{
+        log::init as init_log,
+        storage::{RocksDB, WrappedStorageBackend},
+    };
 
     use super::*;
 
@@ -61,13 +64,12 @@ mod tests {
         init_log(crate::log::Config::Development).unwrap();
 
         log::debug!("test commit...");
-        println!("test commit...");
 
         let temp_dir = tempdir().expect("Failed to create temp directory");
         let db_path = temp_dir.path();
 
         let config = Config {
-            backend: RocksDB::new(db_path).unwrap(),
+            backend: WrappedStorageBackend::new("memory://"),
             base_dir: PathBuf::from("./resources/save/20250511"),
             working_dir: PathBuf::from("./resources/save/20250512"),
         };

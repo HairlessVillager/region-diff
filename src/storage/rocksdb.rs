@@ -1,6 +1,5 @@
 use hex::encode as hex;
 use rocksdb::{DB, Options, WriteBatch};
-use similar::DiffableStr;
 
 use std::path::Path;
 
@@ -58,7 +57,7 @@ impl StorageBackend for RocksDB {
         }
     }
 
-    fn delete<K>(&self, key: K) -> Result<(), Error>
+    fn delete<K>(&mut self, key: K) -> Result<(), Error>
     where
         K: AsRef<[u8]>,
     {
