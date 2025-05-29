@@ -40,7 +40,7 @@ pub fn create_storage_backend(url: &str) -> WrappedStorageBackend {
             log::warn!("the tempdir will not be auto-deleted");
             let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
             let db_path = temp_dir.path();
-            WrappedStorageBackend::RocksDB(RocksDB::new(db_path).unwrap())
+            WrappedStorageBackend::RocksDB(RocksDB::new_temp(db_path).unwrap())
         }
         _ => panic!("unsupported storage backend scheme"),
     }

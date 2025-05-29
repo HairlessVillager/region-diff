@@ -1,23 +1,54 @@
 use hex::encode as hex;
 use rocksdb::{DB, Options, WriteBatch};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::err::Error;
 
 use super::StorageBackend;
 
 pub struct RocksDB {
+    clear_when_drop: bool,
+    path_buf: PathBuf,
+    opts: Options,
     db: DB,
 }
 
 impl RocksDB {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let path_buf = path.as_ref().to_path_buf();
         let mut opts = Options::default();
         opts.create_if_missing(true);
-        let db =
-            DB::open(&opts, path).map_err(|e| Error::from_msg_err("failed to open RocksDB", &e))?;
-        Ok(Self { db })
+        let db = DB::open(&opts, &path_buf)
+            .map_err(|e| Error::from_msg_err("failed to open RocksDB", &e))?;
+        Ok(Self {
+            clear_when_drop: false,
+            path_buf,
+            opts,
+            db,
+        })
+    }
+    pub fn new_temp<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let path_buf = path.as_ref().to_path_buf();
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, &path_buf)
+            .map_err(|e| Error::from_msg_err("failed to open RocksDB", &e))?;
+        Ok(Self {
+            clear_when_drop: true,
+            path_buf,
+            opts,
+            db,
+        })
+    }
+}
+
+impl Drop for RocksDB {
+    fn drop(&mut self) {
+        if self.clear_when_drop {
+            let _ = DB::destroy(&self.opts, &self.path_buf)
+                .map_err(|e| log::warn!("failed to destory RocksDB: {e}"));
+        }
     }
 }
 
@@ -119,6 +150,8 @@ mod tests {
         let value3 = db.get(b"key3").expect("Failed to get value3");
         assert_eq!(value3.unwrap(), b"value3");
 
+        drop(db);
+
         temp_dir.close().expect("Failed to clean up temp directory");
     }
 
@@ -127,7 +160,7 @@ mod tests {
         let temp_dir = tempdir().expect("Failed to create temp directory");
         let db_path = temp_dir.path();
 
-        let mut storage = RocksDB::new(db_path).unwrap();
+        let mut storage = RocksDB::new_temp(db_path).unwrap();
 
         storage
             .put_batch(vec![(b"key1", b"value1")].into_iter())
@@ -154,6 +187,8 @@ mod tests {
             Ok(_) => panic!("Expected KeyNotFound error after deletion"),
             Err(_) => {}
         }
+
+        drop(storage);
 
         temp_dir.close().expect("Failed to clean up temp directory");
     }
