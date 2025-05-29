@@ -14,7 +14,7 @@ impl Diff<Value> for ChunkDiff {
     where
         Self: Sized,
     {
-        log::debug!("from_compare()...");
+        log::trace!("from_compare()...");
         let mut old = match old {
             Value::Compound(x) => x.clone(),
             _ => panic!("invalid old nbt"),
@@ -24,22 +24,22 @@ impl Diff<Value> for ChunkDiff {
             _ => panic!("invalid new nbt"),
         };
 
-        log::debug!("calc diff_block_entities...");
+        log::trace!("calc diff_block_entities...");
         let diff_block_entities;
         {
-            log::debug!("pop_block_entities_from for old...");
+            log::trace!("pop_block_entities_from for old...");
             let old_block_entities = old.remove("block_entities").unwrap();
-            log::debug!("pop_block_entities_from for new...");
+            log::trace!("pop_block_entities_from for new...");
             let new_block_entities = new.remove("block_entities").unwrap();
-            log::debug!("MyersDiff::from_compare...");
+            log::trace!("MyersDiff::from_compare...");
             diff_block_entities =
                 BlockEntitiesDiff::from_compare(&old_block_entities, &new_block_entities);
         }
 
-        log::debug!("calc diff_sections...");
+        log::trace!("calc diff_sections...");
         let diff_sections;
         {
-            log::debug!("get old/new sections...");
+            log::trace!("get old/new sections...");
             let old_sections = old.remove("sections").unwrap();
             let old_sections = match old_sections {
                 Value::List(x) => x,
@@ -52,7 +52,7 @@ impl Diff<Value> for ChunkDiff {
             };
             assert_eq!(old_sections.len(), new_sections.len());
 
-            log::debug!("calc diff_sections by old/new sections...");
+            log::trace!("calc diff_sections by old/new sections...");
             let mut mut_diff_sections = Vec::with_capacity(old_sections.len());
             for (old, new) in old_sections.iter().zip(new_sections.iter()) {
                 let old = fastnbt::to_bytes(old).unwrap();
@@ -63,7 +63,7 @@ impl Diff<Value> for ChunkDiff {
             diff_sections = mut_diff_sections;
         }
 
-        log::debug!("calc diff_others...");
+        log::trace!("calc diff_others...");
         let diff_others;
         {
             let old_others = fastnbt::to_bytes(&Value::Compound(old.clone())).unwrap();
@@ -71,7 +71,7 @@ impl Diff<Value> for ChunkDiff {
             diff_others = MyersDiff::from_compare(&old_others, &new_others);
         }
 
-        log::debug!("from_compare()...done");
+        log::trace!("from_compare()...done");
         Self {
             block_entities: diff_block_entities,
             sections: diff_sections,

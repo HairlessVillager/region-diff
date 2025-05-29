@@ -29,14 +29,20 @@ pub enum WrappedStorageBackend {
     RocksDB(RocksDB),
 }
 
-impl WrappedStorageBackend {
-    pub fn new(url: &str) -> WrappedStorageBackend {
-        let parsed = Url::parse(url).unwrap();
-        match parsed.scheme() {
-            "memory" => Self::Memory(Memory::new()),
-            "rocksdb" => Self::RocksDB(RocksDB::new(parsed.path()).unwrap()),
-            _ => panic!("unsupported storage backend scheme"),
+pub fn create_storage_backend(url: &str) -> WrappedStorageBackend {
+    let parsed = Url::parse(url).unwrap();
+    match parsed.scheme() {
+        "memory" => WrappedStorageBackend::Memory(Memory::new()),
+        "rocksdb" => WrappedStorageBackend::RocksDB(RocksDB::new(parsed.path()).unwrap()),
+
+        #[cfg(test)]
+        "tempdir" => {
+            log::warn!("the tempdir will not be auto-deleted");
+            let temp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+            let db_path = temp_dir.path();
+            WrappedStorageBackend::RocksDB(RocksDB::new(db_path).unwrap())
         }
+        _ => panic!("unsupported storage backend scheme"),
     }
 }
 

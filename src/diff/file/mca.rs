@@ -56,7 +56,7 @@ impl Diff<Vec<u8>> for MCADiff {
         let mut chunks = vec![const { ChunkWithTimestampDiff::BothNotExist }; 1024];
         let mut timing_start = Instant::now();
         for (i, x, z) in create_chunk_ixz_iter() {
-            log::debug!("compare chunk i: {}", i);
+            log::trace!("compare chunk i: {}", i);
             if log_enabled!(Level::Info) {
                 timing_start = Instant::now();
             }

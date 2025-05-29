@@ -1,14 +1,19 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use bincode::{Decode, Encode};
+use fastnbt::value;
 use glob::Pattern as GlobPattern;
 use hex::encode as hex;
 
 use super::{ObjectHash, diff::Diff};
-use crate::{object::object_hash, storage::StorageBackend};
+use crate::{
+    object::{Object, object_hash},
+    storage::StorageBackend,
+};
 
 type RelativeFilePath = PathBuf;
 
+#[derive(Debug, Encode, Decode)]
 pub struct Tree {
     path2diff: BTreeMap<RelativeFilePath, ObjectHash>,
 }
@@ -72,8 +77,7 @@ impl Tree {
             }
         };
         let diff_2_kv = |(path, diff): (PathBuf, Diff)| {
-            let value = diff.serialize();
-            let key = object_hash(&value);
+            let (key, value) = diff.as_kv();
             log::debug!("insert path: {:?}, key: {}", path, hex(&key));
             path2diff.insert(path, key.clone());
             (key, value)

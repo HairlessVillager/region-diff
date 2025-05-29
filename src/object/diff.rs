@@ -5,21 +5,13 @@ use crate::{
     util::create_bincode_config,
 };
 
+use super::Object;
+
 #[derive(Debug, Encode, Decode)]
 #[repr(u8)]
 pub enum Diff {
     Blob(BlobDiff) = 1,
     Region(MCADiff) = 2,
-}
-
-impl ToString for Diff {
-    fn to_string(&self) -> String {
-        match self {
-            Diff::Blob(_) => "blob",
-            Diff::Region(_) => "region",
-        }
-        .to_string()
-    }
 }
 
 impl Diff {
@@ -50,14 +42,6 @@ impl Diff {
     pub fn revert(&self, new: &Vec<u8>) -> Vec<u8> {
         todo!()
     }
-
-    pub fn serialize(&self) -> Vec<u8> {
-        encode_to_vec(self, create_bincode_config()).unwrap()
-    }
-
-    pub fn deserialize(data: &Vec<u8>) -> Self {
-        decode_from_slice(data, create_bincode_config())
-            .map(|(de, _)| de)
-            .unwrap()
-    }
 }
+
+impl Object for Diff {}

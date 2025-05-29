@@ -1,15 +1,11 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    path::PathBuf,
-};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use walkdir::WalkDir;
 
 use crate::{
-    config::Config,
+    config::get_config,
     object::tree::{Tree, TreeBuildItem},
-    storage::StorageBackend,
+    storage::create_storage_backend,
     util::merge_map,
 };
 
@@ -27,9 +23,12 @@ fn walkdir_strip_prefix(root: &PathBuf) -> BTreeMap<PathBuf, PathBuf> {
     )
 }
 
-pub fn commit<S: StorageBackend>(mut config: Config<S>, message: &str) {
+pub fn commit(message: &str) {
+    let config = get_config();
+    let mut backend = create_storage_backend(&config.backend_url);
     let base = walkdir_strip_prefix(&config.base_dir);
     let working = walkdir_strip_prefix(&config.working_dir);
+
     let base_working = merge_map(base, working);
     let build_items = base_working
         .into_iter()
@@ -42,39 +41,27 @@ pub fn commit<S: StorageBackend>(mut config: Config<S>, message: &str) {
                 fs::read(&path).expect(&format!("file {:?} exists but failed to read", &path))
             }),
         });
-    Tree::from_iter(&mut config.backend, build_items);
+    Tree::from_iter(&mut backend, build_items);
     todo!("write tree object to storage backend");
     todo!("write commit object to storage backend");
 }
 
 #[cfg(test)]
 mod tests {
-    use tempfile::tempdir;
-
-    use crate::{
-        log::init as init_log,
-        storage::{RocksDB, WrappedStorageBackend},
-    };
+    use crate::config::{Config, init_config};
 
     use super::*;
 
     #[test]
     #[ignore = "todo: write tree object to storage backend; write commit object to storage backend"]
     fn test_commit() {
-        init_log(crate::log::Config::Development).unwrap();
-
-        log::debug!("test commit...");
-
-        let temp_dir = tempdir().expect("Failed to create temp directory");
-        let db_path = temp_dir.path();
-
-        let config = Config {
-            backend: WrappedStorageBackend::new("memory://"),
+        init_config(Config {
+            backend_url: "memory://".to_string(),
             base_dir: PathBuf::from("./resources/save/20250511"),
             working_dir: PathBuf::from("./resources/save/20250512"),
-        };
-        commit(config, "test commit");
+            log_config: crate::config::LogConfig::Development,
+        });
 
-        temp_dir.close().expect("Failed to clean up temp directory");
+        commit("test commit");
     }
 }
