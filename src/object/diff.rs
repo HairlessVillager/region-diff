@@ -43,5 +43,3 @@ impl Diff {
         todo!()
     }
 }
-
-impl Object for Diff {}

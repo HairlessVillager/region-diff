@@ -84,6 +84,15 @@ impl StorageBackend for RocksDB {
             .map_err(|e| Error::from_msg_err("failed to write batch to RocksDB", &e))
     }
 
+    fn exists<K>(&self, key: K) -> bool
+    where
+        K: AsRef<[u8]>,
+    {
+        log::trace!("exists key {}", hex(&key));
+        let db = self.db.as_ref().unwrap();
+        db.key_may_exist(key)
+    }
+
     fn get<K>(&self, key: K) -> Result<Vec<u8>, Error>
     where
         K: AsRef<[u8]>,

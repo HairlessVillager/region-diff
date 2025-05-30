@@ -9,8 +9,6 @@ pub struct Commit {
     timestamp: String,
 }
 
-impl Object for Commit {}
-
 impl Commit {
     pub fn from(parents: Option<&Vec<ObjectHash>>, tree: &ObjectHash, message: &str) -> Self {
         Self {

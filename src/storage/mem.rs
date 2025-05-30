@@ -40,6 +40,13 @@ impl StorageBackend for Memory {
         Ok(())
     }
 
+    fn exists<K>(&self, key: K) -> bool
+    where
+        K: AsRef<[u8]>,
+    {
+        self.map.contains_key(key.as_ref())
+    }
+
     fn get<K>(&self, key: K) -> Result<Vec<u8>, Error>
     where
         K: AsRef<[u8]>,

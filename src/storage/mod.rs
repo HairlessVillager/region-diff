@@ -21,6 +21,10 @@ pub trait StorageBackend {
         K: AsRef<[u8]>,
         V: AsRef<[u8]>;
 
+    fn exists<K>(&self, key: K) -> bool
+    where
+        K: AsRef<[u8]>;
+
     fn get<K>(&self, key: K) -> Result<Vec<u8>, Error>
     where
         K: AsRef<[u8]>;
@@ -74,6 +78,17 @@ impl StorageBackend for WrappedStorageBackend {
         match self {
             Self::Memory(x) => x.put(key, value),
             Self::RocksDB(x) => x.put(key, value),
+        }
+    }
+
+    fn exists<K>(&self, key: K) -> bool
+    where
+        K: AsRef<[u8]>,
+    {
+        log::debug!("check {} is exists from storage backend", &hex(&key)[..8]);
+        match self {
+            Self::Memory(x) => x.exists(key),
+            Self::RocksDB(x) => x.exists(key),
         }
     }
 

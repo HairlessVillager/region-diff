@@ -4,7 +4,7 @@ use walkdir::WalkDir;
 
 use crate::{
     config::get_config,
-    object::{Commit, Object, Tree, TreeBuildItem},
+    object::{Commit, INDEX_HASH, Index, Object, Tree, TreeBuildItem},
     storage::{StorageBackend, create_storage_backend},
     util::{merge_map, put_object},
 };
@@ -43,14 +43,24 @@ pub fn commit(message: &str) {
         });
 
     let tree = Tree::from_iter(&mut backend, build_items);
-    let (key, value) = tree.as_kv();
-    backend.put(&key, &value).unwrap();
+    let (tree_key, tree_value) = tree.as_kv();
+    backend.put(&tree_key, &tree_value).unwrap();
 
-    let commit = Commit::from(None, &key, message);
-    let (key, value) = commit.as_kv();
-    backend.put(&key, &value).unwrap();
+    let commit = Commit::from(None, &tree_key, message);
+    let (commit_key, commit_value) = commit.as_kv();
+    backend.put(&commit_key, &commit_value).unwrap();
 
-    todo!("write commit to index");
+    if backend.exists(INDEX_HASH) {
+        let index = backend.get(INDEX_HASH).unwrap();
+        let mut index = Index::deserialize(&index);
+        index.update_head(commit_key);
+        let index = index.serialize();
+        backend.put(INDEX_HASH, index).unwrap();
+    } else {
+        let index = Index::new(commit_key);
+        let index = index.serialize();
+        backend.put(INDEX_HASH, index).unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -60,7 +70,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "todo: write commit to index"]
+    #[ignore = "todo: assert commit log"]
     fn test_commit() {
         init_config(Config {
             backend_url: "tempdir://".to_string(),
@@ -70,5 +80,7 @@ mod tests {
         });
 
         commit("test commit");
+
+        todo!("assert commit log")
     }
 }
