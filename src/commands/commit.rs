@@ -5,7 +5,7 @@ use walkdir::WalkDir;
 use crate::{
     config::get_config,
     object::{Commit, INDEX_HASH, Index, Object, Tree, TreeBuildItem},
-    storage::{StorageBackend, create_storage_backend},
+    storage::{StorageBackend, WrappedStorageBackend, create_storage_backend},
     util::{merge_map, put_object},
 };
 
@@ -23,9 +23,8 @@ fn walkdir_strip_prefix(root: &PathBuf) -> BTreeMap<PathBuf, PathBuf> {
     )
 }
 
-pub fn commit(message: &str) {
+pub fn commit(backend: &mut WrappedStorageBackend, message: &str) {
     let config = get_config();
-    let mut backend = create_storage_backend(&config.backend_url);
     let base = walkdir_strip_prefix(&config.base_dir);
     let working = walkdir_strip_prefix(&config.working_dir);
 
@@ -42,7 +41,7 @@ pub fn commit(message: &str) {
             }),
         });
 
-    let tree = Tree::from_iter(&mut backend, build_items);
+    let tree = Tree::from_iter(backend, build_items);
     let (tree_key, tree_value) = tree.as_kv();
     backend.put(&tree_key, &tree_value).unwrap();
 
@@ -53,7 +52,7 @@ pub fn commit(message: &str) {
     if backend.exists(INDEX_HASH) {
         let index = backend.get(INDEX_HASH).unwrap();
         let mut index = Index::deserialize(&index);
-        index.update_head(commit_key);
+        index.set_head(commit_key);
         let index = index.serialize();
         backend.put(INDEX_HASH, index).unwrap();
     } else {
@@ -65,12 +64,15 @@ pub fn commit(message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{Config, init_config};
+    use crate::{
+        commands::{log, status},
+        config::{Config, init_config},
+    };
 
     use super::*;
 
     #[test]
-    #[ignore = "todo: assert commit log"]
+    #[ignore = "todo: mutable config, continues commits"]
     fn test_commit() {
         init_config(Config {
             backend_url: "tempdir://".to_string(),
@@ -78,9 +80,14 @@ mod tests {
             working_dir: PathBuf::from("./resources/save/20250512"),
             log_config: crate::config::LogConfig::NoLog,
         });
+        let mut backend = create_storage_backend(&get_config().backend_url);
 
-        commit("test commit");
-
-        todo!("assert commit log")
+        let message = "test commit";
+        commit(&mut backend, message);
+        let logs = log(&backend);
+        assert_eq!(logs[0].0, message);
+        let status = status(&backend);
+        assert_eq!(status.0, Some("main".to_string()));
+        assert_eq!(status.2, message);
     }
 }

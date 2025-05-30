@@ -11,7 +11,7 @@ pub struct Config {
 }
 
 pub enum LogConfig {
-    Development,
+    Trace,
     Production,
     NoLog,
 }

@@ -3,12 +3,15 @@ use crate::util::create_bincode_config;
 use super::{Object, ObjectHash};
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 
+pub type Message = String;
+pub type Timestamp = String;
+
 #[derive(Debug, Encode, Decode)]
 pub struct Commit {
     parents: Vec<ObjectHash>,
     tree: ObjectHash,
-    message: String,
-    timestamp: String,
+    message: Message,
+    timestamp: Timestamp,
 }
 
 impl Commit {
@@ -19,6 +22,15 @@ impl Commit {
             message: message.to_string(),
             timestamp: chrono::Utc::now().format("%H:%M:%S%.6f").to_string(),
         }
+    }
+    pub fn get_parents(&self) -> &Vec<ObjectHash> {
+        &self.parents
+    }
+    pub fn get_message(&self) -> &Message {
+        &self.message
+    }
+    pub fn get_timestamp(&self) -> &Timestamp {
+        &self.timestamp
     }
 }
 

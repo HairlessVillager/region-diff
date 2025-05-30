@@ -1,16 +1,13 @@
-use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use blake2::{Blake2s256, Digest};
-
-use crate::util::create_bincode_config;
 
 mod commit;
 mod diff;
 mod index;
 mod tree;
 
-pub use commit::Commit;
+pub use commit::{Commit, Message, Timestamp};
 pub use diff::Diff;
-pub use index::Index;
+pub use index::{Head, Index};
 pub use tree::{Tree, TreeBuildItem};
 
 pub type ObjectHash = Vec<u8>; // 256 bits

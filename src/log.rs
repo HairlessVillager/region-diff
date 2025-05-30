@@ -212,7 +212,7 @@ impl Drop for DevelopmentLogger {
 
 pub fn init_log(config: &LogConfig) {
     match config {
-        LogConfig::Development => {
+        LogConfig::Trace => {
             log::set_boxed_logger(Box::new(DevelopmentLogger::new().unwrap())).unwrap();
             log::set_max_level(LevelFilter::Trace);
         }
