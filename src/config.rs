@@ -13,6 +13,7 @@ pub struct Config {
 pub enum LogConfig {
     Development,
     Production,
+    NoLog,
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();

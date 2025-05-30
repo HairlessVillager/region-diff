@@ -217,5 +217,6 @@ pub fn init_log(config: &LogConfig) {
             log::set_max_level(LevelFilter::Trace);
         }
         LogConfig::Production => todo!("ProductionLogger"),
+        LogConfig::NoLog => {}
     };
 }

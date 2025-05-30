@@ -43,3 +43,17 @@ impl Diff {
         todo!()
     }
 }
+
+impl Object for Diff {
+    fn serialize(&self) -> Vec<u8> {
+        encode_to_vec(self, create_bincode_config()).unwrap()
+    }
+    fn deserialize(data: &Vec<u8>) -> Self
+    where
+        Self: Decode<()>,
+    {
+        decode_from_slice(data, create_bincode_config())
+            .map(|(de, _)| de)
+            .unwrap()
+    }
+}

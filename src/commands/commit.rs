@@ -57,7 +57,7 @@ pub fn commit(message: &str) {
         let index = index.serialize();
         backend.put(INDEX_HASH, index).unwrap();
     } else {
-        let index = Index::new(commit_key);
+        let index = Index::new(commit_key, "main".to_string());
         let index = index.serialize();
         backend.put(INDEX_HASH, index).unwrap();
     }
@@ -76,7 +76,7 @@ mod tests {
             backend_url: "tempdir://".to_string(),
             base_dir: PathBuf::from("./resources/save/20250511"),
             working_dir: PathBuf::from("./resources/save/20250512"),
-            log_config: crate::config::LogConfig::Development,
+            log_config: crate::config::LogConfig::NoLog,
         });
 
         commit("test commit");

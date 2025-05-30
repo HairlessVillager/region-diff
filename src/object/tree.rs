@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
-use bincode::{Decode, Encode};
+use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use fastnbt::value;
 use glob::Pattern as GlobPattern;
 use hex::encode as hex;
@@ -9,6 +9,7 @@ use super::{ObjectHash, diff::Diff};
 use crate::{
     object::{Object, object_hash},
     storage::StorageBackend,
+    util::create_bincode_config,
 };
 
 type RelativeFilePath = PathBuf;
@@ -89,6 +90,20 @@ impl Tree {
         backend.put_batch(iter).unwrap();
 
         Self { path2diff }
+    }
+}
+
+impl Object for Tree {
+    fn serialize(&self) -> Vec<u8> {
+        encode_to_vec(self, create_bincode_config()).unwrap()
+    }
+    fn deserialize(data: &Vec<u8>) -> Self
+    where
+        Self: Decode<()>,
+    {
+        decode_from_slice(data, create_bincode_config())
+            .map(|(de, _)| de)
+            .unwrap()
     }
 }
 
