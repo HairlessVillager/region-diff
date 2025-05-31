@@ -16,6 +16,7 @@ pub fn log(backend: &WrappedStorageBackend) -> Vec<(Message, Timestamp, ObjectHa
     loop {
         let commit = backend.get(&curr).unwrap();
         let commit = Commit::deserialize(&commit);
+        log::trace!("commit: {:?}", commit);
         let message = commit.get_message().clone();
         let timestamp = commit.get_timestamp().clone();
         prevs.push((message, timestamp, curr));

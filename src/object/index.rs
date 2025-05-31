@@ -28,11 +28,8 @@ impl Index {
             head: Head::OnBranch(branch.clone()),
         }
     }
-    pub fn set_head(&mut self, commit: ObjectHash) {
-        match &self.head {
-            Head::OnBranch(branch) => self.set_ref(branch.clone(), commit),
-            Head::Detached(_) => self.head = Head::Detached(commit),
-        }
+    pub fn set_head(&mut self, head: Head) {
+        self.head = head;
     }
     pub fn set_ref(&mut self, name: String, commit: ObjectHash) {
         self.refs.insert(name, commit);
