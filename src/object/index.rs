@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use blake2::{Blake2s256, Digest};
@@ -39,6 +39,17 @@ impl Index {
     }
     pub fn get_ref(&self, name: &String) -> Option<&ObjectHash> {
         self.refs.get(name)
+    }
+    pub fn get_all_refs(&self) -> HashSet<&ObjectHash> {
+        let mut refs = HashSet::with_capacity(self.refs.len() + 1);
+        refs.insert(match &self.head {
+            Head::Detached(commit_hash) => commit_hash,
+            Head::OnBranch(branch) => self.get_ref(branch).unwrap(),
+        });
+        for commit_hash in self.refs.values() {
+            refs.insert(commit_hash);
+        }
+        refs
     }
 }
 
