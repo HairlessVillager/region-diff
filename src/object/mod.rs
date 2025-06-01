@@ -1,14 +1,9 @@
 use blake2::{Blake2s256, Digest};
 
-mod commit;
-mod diff;
-mod index;
-mod tree;
-
-pub use commit::{Commit, Message, Timestamp};
-pub use diff::Diff;
-pub use index::{Head, Index};
-pub use tree::{Tree, TreeBuildItem};
+pub mod commit;
+pub mod diff;
+pub mod index;
+pub mod tree;
 
 pub type ObjectHash = Vec<u8>; // 256 bits
 pub static INDEX_HASH: &'static [u8; 32] = &[0u8; 32];

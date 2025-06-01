@@ -1,6 +1,6 @@
 use crate::{
-    object::{Commit, Head, INDEX_HASH, Index, Message, Object, ObjectHash, Timestamp},
-    storage::{StorageBackend, WrappedStorageBackend, create_storage_backend},
+    object::{commit::{Commit, Message, Timestamp}, index::{Head, Index}, Object, ObjectHash, INDEX_HASH},
+    storage::{StorageBackend, WrappedStorageBackend},
 };
 
 pub fn log(backend: &WrappedStorageBackend) -> Vec<(Message, Timestamp, ObjectHash)> {
@@ -21,11 +21,11 @@ pub fn log(backend: &WrappedStorageBackend) -> Vec<(Message, Timestamp, ObjectHa
         let timestamp = commit.get_timestamp().clone();
         prevs.push((message, timestamp, curr));
 
-        let prev = commit.get_parents().get(0); // todo: line here, should in graph
+        let prev = commit.get_edges().get(0); // todo: line here, should in graph
         match prev {
             None => break,
-            Some(commit_hash) => {
-                curr = commit_hash.clone();
+            Some(edge) => {
+                curr = edge.commit.clone();
             }
         }
     }

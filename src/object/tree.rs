@@ -1,18 +1,17 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf};
 
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
-use fastnbt::value;
 use glob::Pattern as GlobPattern;
 use hex::encode as hex;
 
 use super::{ObjectHash, diff::Diff};
 use crate::{
-    object::{Object, object_hash},
+    object::{Object},
     storage::StorageBackend,
     util::create_bincode_config,
 };
 
-type RelativeFilePath = PathBuf;
+pub type RelativeFilePath = PathBuf;
 
 #[derive(Debug, Encode, Decode)]
 pub struct Tree {
@@ -26,8 +25,7 @@ pub struct TreeBuildItem {
     pub(crate) new: Option<Vec<u8>>,
 }
 
-// TODO: rename to Policy
-struct Strategy {
+struct Policy {
     pattern: Pattern,
     diff: String,
 }
@@ -43,7 +41,7 @@ impl Tree {
         I: Iterator<Item = TreeBuildItem>,
     {
         // TODO: configurable
-        let strategies = vec![Strategy {
+        let strategies = vec![Policy {
             pattern: Pattern::Glob(GlobPattern::new("*.mca").unwrap()),
             diff: "region".to_string(),
         }];
@@ -90,6 +88,9 @@ impl Tree {
         backend.put_batch(iter).unwrap();
 
         Self { path2diff }
+    }
+    pub fn files(&self) -> BTreeSet<RelativeFilePath> {
+        self.path2diff.keys().map(|e|e.clone()).collect()
     }
 }
 

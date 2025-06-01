@@ -1,6 +1,6 @@
 use crate::{
-    object::{Commit, Head, INDEX_HASH, Index, Message, Object, ObjectHash, Timestamp},
-    storage::{StorageBackend, WrappedStorageBackend, create_storage_backend},
+    object::{commit::{Commit, Message, Timestamp}, index::{Head, Index}, Object, ObjectHash, INDEX_HASH},
+    storage::{StorageBackend, WrappedStorageBackend},
 };
 
 pub fn status(backend: &WrappedStorageBackend) -> (Option<String>, ObjectHash, Message, Timestamp) {

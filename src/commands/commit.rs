@@ -4,9 +4,9 @@ use walkdir::WalkDir;
 
 use crate::{
     config::get_config,
-    object::{Commit, Head, INDEX_HASH, Index, Object, Tree, TreeBuildItem},
-    storage::{StorageBackend, WrappedStorageBackend, create_storage_backend},
-    util::{merge_map, put_object},
+    object::{commit::Commit, index::{Head, Index}, tree::{Tree, TreeBuildItem}, Object, INDEX_HASH},
+    storage::{StorageBackend, WrappedStorageBackend},
+    util::merge_map,
 };
 
 fn walkdir_strip_prefix(root: &PathBuf) -> BTreeMap<PathBuf, PathBuf> {
@@ -23,7 +23,7 @@ fn walkdir_strip_prefix(root: &PathBuf) -> BTreeMap<PathBuf, PathBuf> {
     )
 }
 
-pub fn commit(backend: &mut WrappedStorageBackend, message: &str) {
+pub fn commit(backend: &mut WrappedStorageBackend, message: String) {
     let config = get_config();
     if !config.base_dir.exists() {
         panic!("base directory {:?} not exists", config.base_dir);
@@ -61,8 +61,8 @@ pub fn commit(backend: &mut WrappedStorageBackend, message: &str) {
         match index.get_head() {
             Head::Detached(prev_commit_hash) => {
                 log::trace!("head is Head::Detached");
-                let commit =
-                    Commit::from(Some(&vec![prev_commit_hash.clone()]), &tree_key, message);
+                let mut commit = Commit::new(tree.files(), message);
+                commit.add_parent(prev_commit_hash.clone(), tree_key);
                 let (commit_key, commit_value) = commit.as_kv();
                 backend.put(&commit_key, &commit_value).unwrap();
 
@@ -74,8 +74,8 @@ pub fn commit(backend: &mut WrappedStorageBackend, message: &str) {
             Head::OnBranch(branch) => {
                 log::trace!("head is Head::OnBranch");
                 let prev_commit_hash = index.get_ref(branch).unwrap();
-                let commit =
-                    Commit::from(Some(&vec![prev_commit_hash.clone()]), &tree_key, message);
+                let mut commit = Commit::new(tree.files(), message);
+                commit.add_parent(prev_commit_hash.clone(), tree_key);
                 let (commit_key, commit_value) = commit.as_kv();
                 backend.put(&commit_key, &commit_value).unwrap();
 
@@ -88,7 +88,7 @@ pub fn commit(backend: &mut WrappedStorageBackend, message: &str) {
     // initial commit
     else {
         log::trace!("initial commit");
-        let commit = Commit::from(None, &tree_key, message);
+        let commit = Commit::from_bare(tree_key, tree.files(), message);
         let (commit_key, commit_value) = commit.as_kv();
         backend.put(&commit_key, &commit_value).unwrap();
 
@@ -102,7 +102,7 @@ pub fn commit(backend: &mut WrappedStorageBackend, message: &str) {
 mod tests {
     use crate::{
         commands::{log, status},
-        config::{Config, with_test_config},
+        config::{with_test_config, Config}, storage::create_storage_backend,
     };
 
     use super::*;
@@ -122,7 +122,7 @@ mod tests {
                 log_config: crate::config::LogConfig::NoLog,
             },
             || {
-                commit(&mut backend, message_1);
+                commit(&mut backend, message_1.to_string());
 
                 let logs = log(&backend);
                 assert_eq!(logs[0].0, message_1);
@@ -140,7 +140,7 @@ mod tests {
                 log_config: crate::config::LogConfig::Trace,
             },
             || {
-                commit(&mut backend, message_2);
+                commit(&mut backend, message_2.to_string());
 
                 let logs = log(&backend);
                 assert_eq!(logs[0].0, message_2);
