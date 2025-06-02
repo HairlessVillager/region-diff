@@ -1,6 +1,6 @@
 mod checkout;
 mod commit;
-mod graph;
+pub mod graph;
 mod log;
 mod status;
 

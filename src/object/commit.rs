@@ -1,8 +1,8 @@
-use std::{collections::{BTreeSet}};
+use std::collections::BTreeSet;
 
-use crate::util::create_bincode_config;
+use crate::{commands::graph::EdgeCost, util::create_bincode_config};
 
-use super::{tree::RelativeFilePath, Object, ObjectHash};
+use super::{Object, ObjectHash, tree::RelativeFilePath};
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 
 pub type Message = String;
@@ -17,23 +17,41 @@ pub struct Commit {
     timestamp: Timestamp,
 }
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Encode, Decode, Clone)]
 pub struct ParentEdge {
     pub commit: ObjectHash,
     pub tree: ObjectHash,
-    pub patch_cost: i32,
-    pub revert_cost: i32,
+    pub cost: EdgeCost,
 }
 
 impl Commit {
     pub fn new(files: BTreeSet<RelativeFilePath>, message: String) -> Self {
-        Self { bare_tree: None, parent_edges: Vec::with_capacity(0), files, message, timestamp: chrono::Utc::now().to_rfc2822() }
+        Self {
+            bare_tree: None,
+            parent_edges: Vec::with_capacity(0),
+            files,
+            message,
+            timestamp: chrono::Utc::now().to_rfc2822(),
+        }
     }
-    pub fn add_parent(&mut self, commit: ObjectHash, tree: ObjectHash)  {
-        self.parent_edges.push(ParentEdge { commit, tree, patch_cost: 1, revert_cost: 1 }); // todo: replace with real cost
+    pub fn add_parent(&mut self, commit: ObjectHash, tree: ObjectHash) {
+        self.parent_edges.push(ParentEdge {
+            commit,
+            tree,
+            cost: EdgeCost {
+                patch: 1,
+                revert: 1,
+            },
+        }); // todo: replace with real cost
     }
     pub fn from_bare(tree: ObjectHash, files: BTreeSet<RelativeFilePath>, message: String) -> Self {
-        Self { bare_tree: Some(tree), parent_edges: Vec::with_capacity(0), files, message, timestamp: chrono::Utc::now().to_rfc2822() }
+        Self {
+            bare_tree: Some(tree),
+            parent_edges: Vec::with_capacity(0),
+            files,
+            message,
+            timestamp: chrono::Utc::now().to_rfc2822(),
+        }
     }
     pub fn get_message(&self) -> &Message {
         &self.message
