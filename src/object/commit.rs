@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::{commands::graph::EdgeCost, util::create_bincode_config};
 
@@ -7,47 +7,39 @@ use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 
 pub type Message = String;
 pub type Timestamp = String; // todo: replace with DateTime<Utc>
+type CommitHash = ObjectHash;
+type TreeHash = ObjectHash;
 
 #[derive(Debug, Encode, Decode)]
 pub struct Commit {
     bare_tree: Option<ObjectHash>,
-    parent_edges: Vec<ParentEdge>, // todo: use map
+    parent_edges: HashMap<CommitHash, (TreeHash, EdgeCost)>,
     files: BTreeSet<RelativeFilePath>,
     message: Message,
     timestamp: Timestamp,
-}
-
-#[derive(Debug, Encode, Decode, Clone)]
-pub struct ParentEdge {
-    pub commit: ObjectHash,
-    pub tree: ObjectHash,
-    pub cost: EdgeCost,
 }
 
 impl Commit {
     pub fn new(files: BTreeSet<RelativeFilePath>, message: String) -> Self {
         Self {
             bare_tree: None,
-            parent_edges: Vec::with_capacity(0),
+            parent_edges: HashMap::new(),
             files,
             message,
             timestamp: chrono::Utc::now().to_rfc2822(),
         }
     }
     pub fn add_parent(&mut self, commit: ObjectHash, tree: ObjectHash) {
-        self.parent_edges.push(ParentEdge {
-            commit,
-            tree,
-            cost: EdgeCost {
-                patch: 1,
-                revert: 1,
-            },
-        }); // todo: replace with real cost
+        let cost = EdgeCost {
+            patch: 1,
+            revert: 1,
+        }; // todo: replace with real cost
+        self.parent_edges.insert(commit, (tree, cost));
     }
     pub fn from_bare(tree: ObjectHash, files: BTreeSet<RelativeFilePath>, message: String) -> Self {
         Self {
             bare_tree: Some(tree),
-            parent_edges: Vec::with_capacity(0),
+            parent_edges: HashMap::new(),
             files,
             message,
             timestamp: chrono::Utc::now().to_rfc2822(),
@@ -59,7 +51,7 @@ impl Commit {
     pub fn get_timestamp(&self) -> &Timestamp {
         &self.timestamp
     }
-    pub fn get_edges(&self) -> &Vec<ParentEdge> {
+    pub fn get_edges(&self) -> &HashMap<CommitHash, (TreeHash, EdgeCost)> {
         &self.parent_edges
     }
 }

@@ -1,5 +1,9 @@
 use crate::{
-    object::{commit::{Commit, Message, Timestamp}, index::{Head, Index}, Object, ObjectHash, INDEX_HASH},
+    object::{
+        INDEX_HASH, Object, ObjectHash,
+        commit::{Commit, Message, Timestamp},
+        index::{Head, Index},
+    },
     storage::{StorageBackend, WrappedStorageBackend},
 };
 
@@ -21,11 +25,11 @@ pub fn log(backend: &WrappedStorageBackend) -> Vec<(Message, Timestamp, ObjectHa
         let timestamp = commit.get_timestamp().clone();
         prevs.push((message, timestamp, curr));
 
-        let prev = commit.get_edges().get(0); // todo: line here, should in graph
-        match prev {
+        let first_prev = commit.get_edges().iter().nth(0); // todo: linear here, should in graph
+        match first_prev {
             None => break,
-            Some(edge) => {
-                curr = edge.commit.clone();
+            Some((edge_commit, _)) => {
+                curr = edge_commit.clone();
             }
         }
     }

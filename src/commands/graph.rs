@@ -155,12 +155,12 @@ pub fn graph(backend: &WrappedStorageBackend) -> CommitGraph<CommitHash> {
         let commit = Commit::deserialize(&commit);
         let edges = commit.get_edges();
         let old: Rc<CommitHash> = graph.get_or_add_commit(&top);
-        for edge in edges {
-            let new: Rc<CommitHash> = graph.get_or_add_commit(&edge.commit);
+        for (edge_commit, (_, edge_cost)) in edges {
+            let new: Rc<CommitHash> = graph.get_or_add_commit(edge_commit);
             if !visited.contains(&new) {
                 refs_stack.push(new.clone());
             }
-            graph.add_edge(&old, &new, edge.cost.clone());
+            graph.add_edge(&old, &new, edge_cost.clone());
         }
         visited.insert(top);
     }
