@@ -11,7 +11,7 @@ pub type Timestamp = String; // todo: replace with DateTime<Utc>
 #[derive(Debug, Encode, Decode)]
 pub struct Commit {
     bare_tree: Option<ObjectHash>,
-    parent_edges: Vec<ParentEdge>,
+    parent_edges: Vec<ParentEdge>, // todo: use map
     files: BTreeSet<RelativeFilePath>,
     message: Message,
     timestamp: Timestamp,

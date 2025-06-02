@@ -25,6 +25,12 @@ pub struct CommitGraph<T> {
     adj_list: HashMap<Rc<T>, HashMap<Rc<T>, EdgeCost>>,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum ApplyEdge<T> {
+    Patch(Rc<T>),
+    Revert(Rc<T>),
+}
+
 impl<T: Eq + Hash + Clone> CommitGraph<T> {
     pub fn add_commit(&mut self, commit: T) -> Rc<T> {
         if let Some(existing) = self.commits.keys().find(|rc| ***rc == commit).cloned() {
@@ -92,8 +98,37 @@ impl<T: Eq + Hash + Clone> CommitGraph<T> {
         done_map.remove(&s);
         done_map
     }
-    pub fn shortest_path(&self, s: &T, t: &T) {
-        todo!()
+    pub fn shortest_path(&self, s: Rc<T>, t: Rc<T>) -> Vec<ApplyEdge<T>> {
+        // build ancestors for two directions
+        let ancestors_s: HashMap<Rc<T>, (u32, Rc<T>)> = self.dijkstra(s, |ec| ec.revert);
+        let ancestors_t: HashMap<Rc<T>, (u32, Rc<T>)> =
+            self.dijkstra(t.clone() /*  */, |ec| ec.patch);
+
+        // find min-cost ca
+        let common_ancestors = ancestors_s
+            .keys()
+            .filter(|k| ancestors_t.contains_key(k.clone()));
+        let (ca, _, _) = common_ancestors
+            .map(|ca| (ca.clone(), ancestors_s[ca].clone(), ancestors_t[ca].clone()))
+            .min_by_key(|(_, (revert_cost, _), (patch_cost, _))| *revert_cost + *patch_cost)
+            .unwrap();
+
+        // build path
+        let mut path = Vec::new();
+        let mut curr = ca.clone();
+        while let Some((_, prev)) = ancestors_s.get(&curr) {
+            path.push(ApplyEdge::Revert(prev.clone()));
+            curr = prev.clone();
+        }
+        path.pop();
+        path.reverse();
+        path.push(ApplyEdge::Revert(ca.clone()));
+        let mut curr = ca.clone();
+        while let Some((_, prev)) = ancestors_t.get(&curr) {
+            path.push(ApplyEdge::Patch(prev.clone()));
+            curr = prev.clone();
+        }
+        path
     }
 }
 
@@ -135,91 +170,178 @@ pub fn graph(backend: &WrappedStorageBackend) -> CommitGraph<CommitHash> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
 
     type TestHash = String;
 
-    fn build_test_graph() -> CommitGraph<TestHash> {
-        let mut graph = CommitGraph::<TestHash> {
-            commits: HashMap::new(),
-            adj_list: HashMap::new(),
-        };
+    mod test_dijkstra {
+        use super::*;
+        use std::rc::Rc;
 
-        let s = graph.add_commit("S".into());
-        let t = graph.add_commit("T".into());
-        let v1s = graph.add_commit("V_1S".into());
-        let v1t = graph.add_commit("V_1T".into());
-        let v2 = graph.add_commit("V_2".into());
-        let v3 = graph.add_commit("V_3".into());
-        let v4 = graph.add_commit("V_4".into());
+        fn build_test_graph() -> CommitGraph<TestHash> {
+            let mut graph = CommitGraph::<TestHash> {
+                commits: HashMap::new(),
+                adj_list: HashMap::new(),
+            };
 
-        let unit_cost = EdgeCost {
-            patch: 1,
-            revert: 1,
-        };
+            let s = graph.add_commit("S".into());
+            let t = graph.add_commit("T".into());
+            let v1s = graph.add_commit("V_1S".into());
+            let v1t = graph.add_commit("V_1T".into());
+            let v2 = graph.add_commit("V_2".into());
+            let v3 = graph.add_commit("V_3".into());
+            let v4 = graph.add_commit("V_4".into());
 
-        graph.add_edge(&v4, &v3, unit_cost.clone());
-        graph.add_edge(&v3, &v1s, unit_cost.clone());
-        graph.add_edge(&v3, &v2, unit_cost.clone());
-        graph.add_edge(&v1s, &s, unit_cost.clone());
-        graph.add_edge(&v2, &v1s, unit_cost.clone());
-        graph.add_edge(&v2, &v1t, unit_cost.clone());
-        graph.add_edge(&v2, &t, unit_cost.clone());
-        graph.add_edge(&v1t, &t, unit_cost.clone());
+            let unit_cost = EdgeCost {
+                patch: 1,
+                revert: 1,
+            };
 
-        graph
+            graph.add_edge(&v4, &v3, unit_cost.clone());
+            graph.add_edge(&v3, &v1s, unit_cost.clone());
+            graph.add_edge(&v3, &v2, unit_cost.clone());
+            graph.add_edge(&v1s, &s, unit_cost.clone());
+            graph.add_edge(&v2, &v1s, unit_cost.clone());
+            graph.add_edge(&v2, &v1t, unit_cost.clone());
+            graph.add_edge(&v2, &t, unit_cost.clone());
+            graph.add_edge(&v1t, &t, unit_cost.clone());
+
+            graph
+        }
+
+        #[test]
+        fn test_from_s() {
+            let graph = build_test_graph();
+            let start = Rc::new("S".into());
+            let paths = graph.dijkstra(start, |ec| ec.patch);
+            let cases = [
+                ("V_1S", 1, "S"),
+                ("V_2", 2, "V_1S"),
+                ("V_3", 2, "V_1S"),
+                ("V_4", 3, "V_3"),
+            ];
+            for case in cases {
+                assert_eq!(
+                    paths.get(&Rc::new(case.0.into())),
+                    Some(&(case.1, Rc::new(case.2.into())))
+                );
+            }
+            assert_eq!(paths.len(), 4);
+        }
+
+        #[test]
+        fn test_from_t() {
+            let graph = build_test_graph();
+            let start = Rc::new("T".into());
+            let paths = graph.dijkstra(start, |ec| ec.revert);
+            let cases = [
+                ("V_1T", 1, "T"),
+                ("V_2", 1, "T"),
+                ("V_3", 2, "V_2"),
+                ("V_4", 3, "V_3"),
+            ];
+            for case in cases {
+                assert_eq!(
+                    paths.get(&Rc::new(case.0.into())),
+                    Some(&(case.1, Rc::new(case.2.into())))
+                );
+            }
+            assert_eq!(paths.len(), 4);
+        }
+
+        #[test]
+        fn test_isolated_node() {
+            let mut graph = CommitGraph::<TestHash> {
+                commits: HashMap::new(),
+                adj_list: HashMap::new(),
+            };
+
+            graph.add_commit("isolated_node".into());
+
+            let paths = graph.dijkstra(Rc::new("ISO".into()), |ec| ec.patch);
+            assert!(paths.is_empty());
+        }
     }
+    mod test_shortest_path {
+        use super::*;
 
-    #[test]
-    fn test_dijkstra_from_s() {
-        let graph = build_test_graph();
-        let start = Rc::new("S".into());
-        let paths = graph.dijkstra(start, |ec| ec.patch);
-        let cases = [
-            ("V_1S", 1, "S"),
-            ("V_2", 2, "V_1S"),
-            ("V_3", 2, "V_1S"),
-            ("V_4", 3, "V_3"),
-        ];
-        for case in cases {
+        fn build_test_graph(complex: bool) -> CommitGraph<TestHash> {
+            let mut graph = CommitGraph::<TestHash> {
+                commits: HashMap::new(),
+                adj_list: HashMap::new(),
+            };
+
+            let s = graph.add_commit("S".into());
+            let t = graph.add_commit("T".into());
+            let v1s = graph.add_commit("V_1S".into());
+            let v2s = graph.add_commit("V_2S".into());
+            let v3s = graph.add_commit("V_3S".into());
+            let v1t = graph.add_commit("V_1T".into());
+            let v2t = graph.add_commit("V_2T".into());
+            let v3t = graph.add_commit("V_3T".into());
+            let v4 = graph.add_commit("V_4".into());
+            let v5 = graph.add_commit("V_5".into());
+            let v6 = graph.add_commit("V_6".into());
+            let v7 = graph.add_commit("V_7".into());
+
+            let unit_cost = EdgeCost {
+                patch: 1,
+                revert: 1,
+            };
+
+            graph.add_edge(&v7, &v6, unit_cost.clone());
+            graph.add_edge(&v6, &v5, unit_cost.clone());
+            graph.add_edge(&v5, &v4, unit_cost.clone());
+            graph.add_edge(&v4, &v3s, unit_cost.clone());
+            graph.add_edge(&v4, &v3t, unit_cost.clone());
+            graph.add_edge(&v3s, &v2s, unit_cost.clone());
+            graph.add_edge(&v3t, &v2t, unit_cost.clone());
+            graph.add_edge(&v2s, &v1s, unit_cost.clone());
+            graph.add_edge(&v2t, &v1t, unit_cost.clone());
+            graph.add_edge(&v1s, &s, unit_cost.clone());
+            graph.add_edge(&v1t, &t, unit_cost.clone());
+
+            if complex {
+                graph.add_edge(&v6, &v1s, unit_cost.clone());
+                graph.add_edge(&v6, &v1t, unit_cost.clone());
+            }
+
+            graph
+        }
+        #[test]
+        fn test_simple_graph() {
+            let graph = build_test_graph(false);
+            let s = Rc::new("S".into());
+            let t = Rc::new("T".into());
+            let path = graph.shortest_path(s, t);
             assert_eq!(
-                paths.get(&Rc::new(case.0.into())),
-                Some(&(case.1, Rc::new(case.2.into())))
+                path,
+                vec![
+                    ApplyEdge::Revert(Rc::new("V_1S".into())),
+                    ApplyEdge::Revert(Rc::new("V_2S".into())),
+                    ApplyEdge::Revert(Rc::new("V_3S".into())),
+                    ApplyEdge::Revert(Rc::new("V_4".into())),
+                    ApplyEdge::Patch(Rc::new("V_3T".into())),
+                    ApplyEdge::Patch(Rc::new("V_2T".into())),
+                    ApplyEdge::Patch(Rc::new("V_1T".into())),
+                    ApplyEdge::Patch(Rc::new("T".into())),
+                ]
             );
         }
-        assert_eq!(paths.len(), 4);
-    }
-
-    #[test]
-    fn test_dijkstra_from_t() {
-        let graph = build_test_graph();
-        let start = Rc::new("T".into());
-        let paths = graph.dijkstra(start, |ec| ec.revert);
-        let cases = [
-            ("V_1T", 1, "T"),
-            ("V_2", 1, "T"),
-            ("V_3", 2, "V_2"),
-            ("V_4", 3, "V_3"),
-        ];
-        for case in cases {
+        #[test]
+        fn test_complex_graph() {
+            let graph = build_test_graph(true);
+            let s = Rc::new("S".into());
+            let t = Rc::new("T".into());
+            let path = graph.shortest_path(s, t);
             assert_eq!(
-                paths.get(&Rc::new(case.0.into())),
-                Some(&(case.1, Rc::new(case.2.into())))
+                path,
+                vec![
+                    ApplyEdge::Revert(Rc::new("V_1S".into())),
+                    ApplyEdge::Revert(Rc::new("V_6".into())),
+                    ApplyEdge::Patch(Rc::new("V_1T".into())),
+                    ApplyEdge::Patch(Rc::new("T".into())),
+                ]
             );
         }
-        assert_eq!(paths.len(), 4);
-    }
-
-    #[test]
-    fn test_dijkstra_from_isolated_node() {
-        let mut graph = CommitGraph::<TestHash> {
-            commits: HashMap::new(),
-            adj_list: HashMap::new(),
-        };
-
-        graph.add_commit("isolated_node".into());
-
-        let paths = graph.dijkstra(Rc::new("ISO".into()), |ec| ec.patch);
-        assert!(paths.is_empty());
     }
 }
