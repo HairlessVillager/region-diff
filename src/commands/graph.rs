@@ -40,6 +40,9 @@ impl<T: Eq + Hash + Clone> CommitGraph<T> {
         self.commits.insert(rc.clone(), ());
         rc
     }
+    pub fn get_commit(&self, commit: &T) -> Option<Rc<T>> {
+        self.commits.keys().find(|rc| ***rc == *commit).cloned()
+    }
     pub fn get_or_add_commit(&mut self, commit: &T) -> Rc<T> {
         self.commits
             .keys()
@@ -133,7 +136,7 @@ impl<T: Eq + Hash + Clone> CommitGraph<T> {
 }
 
 type CommitHash = ObjectHash;
-pub fn graph(backend: &WrappedStorageBackend) -> CommitGraph<CommitHash> {
+pub fn create_graph(backend: &WrappedStorageBackend) -> CommitGraph<CommitHash> {
     let index = backend.get(INDEX_HASH).unwrap();
     let index = Index::deserialize(&index);
     let mut graph = CommitGraph {

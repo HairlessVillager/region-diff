@@ -42,14 +42,17 @@ impl Index {
     }
     pub fn get_all_refs(&self) -> HashSet<&ObjectHash> {
         let mut refs = HashSet::with_capacity(self.refs.len() + 1);
-        refs.insert(match &self.head {
-            Head::Detached(commit_hash) => commit_hash,
-            Head::OnBranch(branch) => self.get_ref(branch).unwrap(),
-        });
+        refs.insert(self.head_to_commit(self.get_head()));
         for commit_hash in self.refs.values() {
             refs.insert(commit_hash);
         }
         refs
+    }
+    pub fn head_to_commit<'a>(&'a self, head: &'a Head) -> &'a ObjectHash {
+        match head {
+            Head::Detached(commit_hash) => commit_hash,
+            Head::OnBranch(branch) => self.get_ref(branch).unwrap(),
+        }
     }
 }
 
