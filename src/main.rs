@@ -31,9 +31,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Compare two file which have the same type, and output a difference
     Diff(DiffArgs),
+    /// Apply the difference to a old file as patching to output the new file
     Patch(PatchRevertArgs),
+    /// Apply the difference to a new file as reverting to output the old file
     Revert(PatchRevertArgs),
+    /// Squashing two adjacent differences
     Squash(SquashArgs),
 }
 
@@ -45,16 +49,6 @@ struct DiffArgs {
     old: String,
     /// Path to new file
     new: String,
-    /// Output mode
-    #[arg(value_enum)]
-    mode: Mode,
-}
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-enum Mode {
-    /// Output as hex string to stdout
-    Hex,
-    /// Output as raw data to stdout
-    Raw,
 }
 
 #[derive(Args)]
@@ -75,9 +69,6 @@ struct SquashArgs {
     base: String,
     /// Path to squashing diff file
     squashing: String,
-    /// Output mode
-    #[arg(value_enum)]
-    mode: Mode,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -86,27 +77,6 @@ enum FileType {
     Region,
 }
 
-fn write_hex<W, D>(writer: &mut W, data: &D, mode: Mode)
-where
-    W: Write,
-    D: AsRef<[u8]>,
-{
-    match mode {
-        Mode::Raw => {
-            writer.write_all(data.as_ref()).unwrap();
-        }
-        Mode::Hex => {
-            for line in data.as_ref().chunks(16) {
-                for byte in line {
-                    writer
-                        .write_all(format!("{:02x} ", byte).as_bytes())
-                        .unwrap();
-                }
-                writer.write_all("\n".as_bytes()).unwrap();
-            }
-        }
-    }
-}
 fn main() {
     let cli = Cli::parse();
     init_config(Config {
@@ -124,7 +94,7 @@ fn main() {
                 }
             };
             let mut writer = BufWriter::new(io::stdout().lock());
-            write_hex(&mut writer, &ser, args.mode);
+            writer.write_all(&ser).unwrap();
             writer.flush().unwrap();
         }
         Commands::Patch(args) => {
@@ -165,7 +135,7 @@ fn main() {
                 }
             };
             let mut writer = BufWriter::new(io::stdout().lock());
-            write_hex(&mut writer, &ser, args.mode);
+            writer.write_all(&ser).unwrap();
             writer.flush().unwrap();
         }
     }
