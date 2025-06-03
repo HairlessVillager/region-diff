@@ -1,80 +1,167 @@
-use clap::{Parser, Subcommand};
+use std::{
+    fs,
+    io::{self, BufWriter, Write},
+    path::PathBuf,
+};
 
-mod commands;
+use clap::{Args, Parser, Subcommand, ValueEnum};
+
+use crate::{
+    diff::{Diff, file::MCADiff},
+    util::serde::{deserialize, serialize},
+};
+
 mod config;
 mod diff;
-mod err;
 mod log;
 mod mca;
-mod object;
-mod storage;
 mod util;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
+#[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
-
-    #[arg(short, long, value_name = "FILE", default_value_t = {".region-diff/config.toml".to_string()})]
-    config: String,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize storage backend
-    Init {
-        #[arg(default_value_t = {".".to_string()})]
-        directory: String,
-    },
-    /// List, create, or delete branches
-    Branch {},
-    /// Record changes to the storagre backend
-    Commit {},
-    /// Switch branches or restore working tree files
-    Checkout {},
-    /// Show commit logs
-    Log {},
-    /// Join two or more development histories together
-    Merge {},
-    /// Show the working tree status
-    Status {},
-    /// Prune all unreachable objects from the storagre backend
-    Prune {},
+    Diff(DiffArgs),
+    Patch(PatchRevertArgs),
+    Revert(PatchRevertArgs),
+    Squash(SquashArgs),
 }
 
+#[derive(Args)]
+struct DiffArgs {
+    /// File type
+    filetype: FileType,
+    /// Path to old file
+    old: String,
+    /// Path to new file
+    new: String,
+    /// Output mode
+    #[arg(value_enum)]
+    mode: Mode,
+}
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Mode {
+    /// Output as hex string to stdout
+    Hex,
+    /// Output as raw data to stdout
+    Raw,
+}
+
+#[derive(Args)]
+struct PatchRevertArgs {
+    /// File type
+    filetype: FileType,
+    /// Path to base file
+    base: String,
+    /// Path to diff file
+    diff: String,
+}
+
+#[derive(Args)]
+struct SquashArgs {
+    /// File type
+    filetype: FileType,
+    /// Path to base diff file
+    base: String,
+    /// Path to squashing diff file
+    squashing: String,
+    /// Output mode
+    #[arg(value_enum)]
+    mode: Mode,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum FileType {
+    /// Minecraft region file
+    Region,
+}
+
+fn write_hex<W, D>(writer: &mut W, data: &D, mode: Mode)
+where
+    W: Write,
+    D: AsRef<[u8]>,
+{
+    match mode {
+        Mode::Raw => {
+            writer.write_all(data.as_ref()).unwrap();
+        }
+        Mode::Hex => {
+            for line in data.as_ref().chunks(16) {
+                for byte in line {
+                    writer
+                        .write_all(format!("{:02x} ", byte).as_bytes())
+                        .unwrap();
+                }
+                writer.write_all("\n".as_bytes()).unwrap();
+            }
+        }
+    }
+}
 fn main() {
     let cli = Cli::parse();
-
-    // // You can check the value provided by positional arguments, or option arguments
-    // if let Some(name) = cli.name.as_deref() {
-    //     println!("Value for name: {name}");
-    // }
-
-    // if let Some(config_path) = cli.config.as_deref() {
-    //     println!("Value for config: {}", config_path.display());
-    // }
-
-    // // You can see how many times a particular flag or argument occurred
-    // // Note, only flags can have multiple occurrences
-    // match cli.debug {
-    //     0 => println!("Debug mode is off"),
-    //     1 => println!("Debug mode is kind of on"),
-    //     2 => println!("Debug mode is on"),
-    //     _ => println!("Don't be crazy"),
-    // }
-
-    // You can check for the existence of subcommands, and if found use their
-    // matches just as you would the top level cmd
-    match &cli.command {
-        Some(_) => {
-            todo!()
+    match cli.command {
+        Commands::Diff(args) => {
+            let old = fs::read(PathBuf::from(args.old)).unwrap();
+            let new = fs::read(PathBuf::from(args.new)).unwrap();
+            let ser = match args.filetype {
+                FileType::Region => {
+                    let diff = MCADiff::from_compare(&old, &new);
+                    serialize(diff)
+                }
+            };
+            let mut writer = BufWriter::new(io::stdout().lock());
+            write_hex(&mut writer, &ser, args.mode);
+            writer.flush().unwrap();
         }
-        None => {}
+        Commands::Patch(args) => {
+            let old = fs::read(PathBuf::from(args.base)).unwrap();
+            let diff = fs::read(PathBuf::from(args.diff)).unwrap();
+            let new = match args.filetype {
+                FileType::Region => {
+                    let diff: MCADiff = deserialize(&diff);
+                    diff.patch(&old)
+                }
+            };
+            let mut writer = BufWriter::new(io::stdout().lock());
+            writer.write_all(&new).unwrap();
+            writer.flush().unwrap();
+        }
+        Commands::Revert(args) => {
+            let new = fs::read(PathBuf::from(args.base)).unwrap();
+            let diff = fs::read(PathBuf::from(args.diff)).unwrap();
+            let old = match args.filetype {
+                FileType::Region => {
+                    let diff: MCADiff = deserialize(&diff);
+                    diff.revert(&new)
+                }
+            };
+            let mut writer = BufWriter::new(io::stdout().lock());
+            writer.write_all(&old).unwrap();
+            writer.flush().unwrap();
+        }
+        Commands::Squash(args) => {
+            let base = fs::read(PathBuf::from(args.base)).unwrap();
+            let squashing = fs::read(PathBuf::from(args.squashing)).unwrap();
+            let ser = match args.filetype {
+                FileType::Region => {
+                    let base: MCADiff = deserialize(&base);
+                    let squashing: MCADiff = deserialize(&squashing);
+                    let squashed = MCADiff::from_squash(&base, &squashing);
+                    serialize(squashed)
+                }
+            };
+            let mut writer = BufWriter::new(io::stdout().lock());
+            write_hex(&mut writer, &ser, args.mode);
+            writer.flush().unwrap();
+        }
     }
-
-    // Continued program logic goes here...
 }

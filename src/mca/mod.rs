@@ -6,8 +6,6 @@ pub use builder::MCABuilder;
 use fastnbt::Value;
 pub use reader::{LazyChunk, MCAReader};
 
-use crate::err::Error;
-
 pub const SECTOR_SIZE: usize = 4096;
 
 #[derive(Debug, Clone)]
@@ -18,19 +16,13 @@ struct HeaderEntry {
     timestamp: u32,
 }
 impl HeaderEntry {
-    fn is_available(&self) -> Result<bool, Error> {
+    fn is_available(&self) -> Result<bool, Box<dyn std::error::Error>> {
         if self.sector_count == 0 && self.sector_offset == 0 {
             Ok(false)
         } else if self.sector_offset < 2 {
-            Err(Error::from(format!(
-                "Sector {} overlaps with header",
-                self.idx
-            )))
+            Err(format!("Sector {} overlaps with header", self.idx).into())
         } else if self.sector_count == 0 {
-            Err(Error::from(format!(
-                "Sector {} size has to be > 0",
-                self.idx
-            )))
+            Err(format!("Sector {} size has to be > 0", self.idx).into())
         } else {
             Ok(true)
         }

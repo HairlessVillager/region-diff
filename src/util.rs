@@ -1,7 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{err::Error, object::Object, storage::StorageBackend};
-
 pub fn create_chunk_ixz_iter() -> impl Iterator<Item = (usize, usize, usize)> {
     (0..32).flat_map(|z| {
         (0..32).map(move |x| {
@@ -9,12 +7,6 @@ pub fn create_chunk_ixz_iter() -> impl Iterator<Item = (usize, usize, usize)> {
             (i, x, z)
         })
     })
-}
-
-pub fn create_bincode_config() -> bincode::config::Configuration<bincode::config::BigEndian> {
-    bincode::config::standard()
-        .with_big_endian()
-        .with_variable_int_encoding()
 }
 
 pub fn wrap_with_root_compound(value: fastnbt::Value) -> fastnbt::Value {
@@ -28,11 +20,6 @@ pub fn unwrap_with_root_compound(value: fastnbt::Value) -> fastnbt::Value {
         fastnbt::Value::Compound(mut map) => map.remove("root").unwrap(),
         _ => panic!("root compound not exists"),
     }
-}
-
-pub fn put_object<S: StorageBackend, O: Object>(backend: &mut S, obj: &O) -> Result<(), Error> {
-    let (key, value) = obj.as_kv();
-    backend.put(key, value)
 }
 
 pub fn fastnbt_serialize(v: &fastnbt::Value) -> Vec<u8> {
@@ -57,6 +44,28 @@ where
     }))
 }
 
+pub mod serde {
+    use bincode::{
+        Decode, Encode,
+        config::{BigEndian, Configuration},
+        decode_from_slice, encode_to_vec,
+    };
+
+    static CONFIG: Configuration<BigEndian> = bincode::config::standard()
+        .with_big_endian()
+        .with_variable_int_encoding();
+
+    pub fn serialize<T: Encode>(val: T) -> Vec<u8> {
+        encode_to_vec(val, CONFIG.clone()).unwrap()
+    }
+    pub fn deserialize<T: Decode<()>>(data: &Vec<u8>) -> T {
+        decode_from_slice(data, CONFIG.clone())
+            .map(|(de, _)| de)
+            .unwrap()
+    }
+}
+
+#[cfg(test)]
 pub mod test {
     use fastnbt::Value;
     use rand::prelude::*;
@@ -152,12 +161,6 @@ pub mod test {
 pub mod compress {
     use std::io::{Read, Write};
 
-    use bincode::{decode_from_slice, encode_to_vec};
-
-    use crate::err::Error;
-
-    use super::create_bincode_config;
-
     #[derive(Debug, Clone, Copy)]
     pub enum CompressionType {
         GZip,
@@ -183,26 +186,26 @@ pub mod compress {
                 _ => panic!("unsupported compression type/magic"),
             }
         }
-        pub fn compress(&self, data: &Vec<u8>) -> Result<Vec<u8>, Error> {
+        pub fn compress(&self, data: &Vec<u8>) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
             match self {
                 CompressionType::GZip => {
                     let mut encoder =
                         flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-                    encoder.write_all(data).map_err(|e| {
-                        Error::from_msg_err("failed to write data to GzEncoder", &e)
-                    })?;
+                    encoder
+                        .write_all(data)
+                        .map_err(|e| format!("failed to write data to GzEncoder: {}", &e))?;
                     Ok(encoder.finish().map_err(|e| {
-                        Error::from_msg_err("failed to finish compression of GzEncoder", &e)
+                        format!("failed to finish compression of GzEncoder: {}", &e)
                     })?)
                 }
                 CompressionType::Zlib => {
                     let mut encoder =
                         flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-                    encoder.write_all(data).map_err(|e| {
-                        Error::from_msg_err("failed to write data to ZlibEncoder", &e)
-                    })?;
+                    encoder
+                        .write_all(data)
+                        .map_err(|e| format!("failed to write data to ZlibEncoder: {}", &e))?;
                     Ok(encoder.finish().map_err(|e| {
-                        Error::from_msg_err("failed to finish compression of ZlibEncoder", &e)
+                        format!("failed to finish compression of ZlibEncoder: {}", &e)
                     })?)
                 }
                 CompressionType::NoCompression => Ok(data.to_vec()),
@@ -212,45 +215,32 @@ pub mod compress {
                 }
             }
         }
-        pub fn compress_with_type(&self, data: &Vec<u8>) -> Result<Vec<u8>, Error> {
-            let data = (self.to_magic(), data);
-            let data = encode_to_vec(data, create_bincode_config())
-                .map_err(|e| Error::from_msg_err("failed to serialize", &e))?;
-            self.compress(&data)
-        }
-        pub fn decompress(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
+        pub fn decompress(&self, data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
             match self {
                 CompressionType::GZip => {
                     let mut decoder = flate2::read::GzDecoder::new(data);
                     let mut decompressed = Vec::new();
-                    decoder.read_to_end(&mut decompressed).map_err(|e| {
-                        Error::from_msg_err("failed to decompress with GzDecoder", &e)
-                    })?;
+                    decoder
+                        .read_to_end(&mut decompressed)
+                        .map_err(|e| format!("failed to decompress with GzDecoder: {}", &e))?;
                     Ok(decompressed)
                 }
                 CompressionType::Zlib => {
                     let mut decoder = flate2::read::ZlibDecoder::new(data);
                     let mut decompressed = Vec::new();
-                    decoder.read_to_end(&mut decompressed).map_err(|e| {
-                        Error::from_msg_err("failed to decompress with ZlibEncoder", &e)
-                    })?;
+                    decoder
+                        .read_to_end(&mut decompressed)
+                        .map_err(|e| format!("failed to decompress with ZlibEncoder: {}", &e))?;
                     Ok(decompressed)
                 }
                 CompressionType::NoCompression => Ok(data.to_vec()),
                 CompressionType::LZ4 => {
                     let mut decompressed = Vec::new();
                     lz4_flex::block::decompress_into(data, &mut decompressed)
-                        .map_err(|e| Error::from_msg_err("failed to decompress with LZ4", &e))?;
+                        .map_err(|e| format!("failed to decompress with LZ4: {}", &e))?;
                     Ok(decompressed)
                 }
             }
-        }
-        pub fn decompress_with_type(&self, data: &[u8]) -> Result<Vec<u8>, Error> {
-            let data = self.decompress(&data)?;
-            let data: ((u8, Vec<u8>), usize) = decode_from_slice(&data, create_bincode_config())
-                .map_err(|e| Error::from_msg_err("failed to deserialize", &e))?;
-            let ((magic, data), _) = data;
-            Self::from_magic(magic).decompress(&data)
         }
     }
 }
