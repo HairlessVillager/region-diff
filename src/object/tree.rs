@@ -1,15 +1,14 @@
-use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use bincode::{Decode, Encode, decode_from_slice, encode_to_vec};
 use glob::Pattern as GlobPattern;
 use hex::encode as hex;
 
 use super::{ObjectHash, diff::Diff};
-use crate::{
-    object::{Object},
-    storage::StorageBackend,
-    util::create_bincode_config,
-};
+use crate::{object::Object, storage::StorageBackend, util::create_bincode_config};
 
 pub type RelativeFilePath = PathBuf;
 
@@ -89,8 +88,8 @@ impl Tree {
 
         Self { path2diff }
     }
-    pub fn files(&self) -> BTreeSet<RelativeFilePath> {
-        self.path2diff.keys().map(|e|e.clone()).collect()
+    pub fn files(&self) -> BTreeSet<&RelativeFilePath> {
+        self.path2diff.keys().collect()
     }
 }
 

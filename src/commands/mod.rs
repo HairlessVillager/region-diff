@@ -1,3 +1,4 @@
+pub mod basecheck;
 mod checkout;
 mod commit;
 pub mod graph;

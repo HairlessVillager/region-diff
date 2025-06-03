@@ -73,8 +73,6 @@ impl Object for Index {
     fn as_kv(&self) -> (ObjectHash, Vec<u8>) {
         let k = INDEX_HASH;
         let v = self.serialize();
-        let mut hasher = Blake2s256::new();
-        hasher.update(&v);
         (k.to_vec(), v)
     }
 }

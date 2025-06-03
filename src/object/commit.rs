@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::{commands::graph::EdgeCost, util::create_bincode_config};
 
@@ -14,17 +14,17 @@ type TreeHash = ObjectHash;
 pub struct Commit {
     bare_tree: Option<ObjectHash>,
     parent_edges: HashMap<CommitHash, (TreeHash, EdgeCost)>,
-    files: BTreeSet<RelativeFilePath>,
+    file_hashs: BTreeMap<RelativeFilePath, Vec<u8>>,
     message: Message,
     timestamp: Timestamp,
 }
 
 impl Commit {
-    pub fn new(files: BTreeSet<RelativeFilePath>, message: String) -> Self {
+    pub fn new(file_hashs: BTreeMap<RelativeFilePath, Vec<u8>>, message: String) -> Self {
         Self {
             bare_tree: None,
             parent_edges: HashMap::new(),
-            files,
+            file_hashs,
             message,
             timestamp: chrono::Utc::now().to_rfc2822(),
         }
@@ -36,11 +36,15 @@ impl Commit {
         }; // todo: replace with real cost
         self.parent_edges.insert(commit, (tree, cost));
     }
-    pub fn from_bare(tree: ObjectHash, files: BTreeSet<RelativeFilePath>, message: String) -> Self {
+    pub fn from_bare(
+        tree: ObjectHash,
+        file_hashs: BTreeMap<RelativeFilePath, Vec<u8>>,
+        message: String,
+    ) -> Self {
         Self {
             bare_tree: Some(tree),
             parent_edges: HashMap::new(),
-            files,
+            file_hashs,
             message,
             timestamp: chrono::Utc::now().to_rfc2822(),
         }
