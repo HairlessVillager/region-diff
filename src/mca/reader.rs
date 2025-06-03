@@ -3,10 +3,7 @@ use crate::util::compress::CompressionType;
 use super::SECTOR_SIZE;
 
 use super::{ChunkWithTimestamp, HeaderEntry};
-use std::{
-    fs::File,
-    io::{BufReader, Cursor, Read, Seek, SeekFrom},
-};
+use std::io::{Cursor, Read, Seek};
 
 #[derive(Debug, Clone)]
 pub enum LazyChunk {
@@ -15,6 +12,7 @@ pub enum LazyChunk {
     Some(ChunkWithTimestamp),
 }
 pub struct MCAReader<R: Read + Seek> {
+    #[allow(dead_code)]
     mca_reader: R,
     header: [HeaderEntry; 1024],
     chunks: [LazyChunk; 1024],
@@ -59,11 +57,14 @@ impl<R: Read + Seek> MCAReader<R> {
         })
     }
 
+    #[cfg(test)]
     pub fn get_chunk(
         &mut self,
         x: usize,
         z: usize,
     ) -> Result<Option<&ChunkWithTimestamp>, Box<dyn std::error::Error>> {
+        use std::io::SeekFrom;
+
         let idx = x + 32 * z;
 
         if let LazyChunk::Some(ref chunk) = self.chunks[idx] {
@@ -110,8 +111,11 @@ impl<R: Read + Seek> MCAReader<R> {
     }
 }
 
-impl MCAReader<BufReader<File>> {
+#[cfg(test)]
+impl MCAReader<std::io::BufReader<std::fs::File>> {
     pub fn from_file(path: &str, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        use std::{fs::File, io::BufReader};
+
         let file = File::open(path).map_err(|e| format!("open file failed: {}", &e))?;
         let reader = BufReader::new(file);
         Self::from_reader(reader, lazy)

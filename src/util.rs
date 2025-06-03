@@ -1,5 +1,3 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 pub fn create_chunk_ixz_iter() -> impl Iterator<Item = (usize, usize, usize)> {
     (0..32).flat_map(|z| {
         (0..32).map(move |x| {
@@ -9,39 +7,11 @@ pub fn create_chunk_ixz_iter() -> impl Iterator<Item = (usize, usize, usize)> {
     })
 }
 
-pub fn wrap_with_root_compound(value: fastnbt::Value) -> fastnbt::Value {
-    fastnbt::Value::Compound(std::collections::BTreeMap::from([(
-        "root".to_string(),
-        value,
-    )]))
-}
-pub fn unwrap_with_root_compound(value: fastnbt::Value) -> fastnbt::Value {
-    match value {
-        fastnbt::Value::Compound(mut map) => map.remove("root").unwrap(),
-        _ => panic!("root compound not exists"),
-    }
-}
-
 pub fn fastnbt_serialize(v: &fastnbt::Value) -> Vec<u8> {
     fastnbt::to_bytes(v).unwrap()
 }
 pub fn fastnbt_deserialize(input: &[u8]) -> fastnbt::Value {
     fastnbt::from_bytes(input).unwrap()
-}
-
-pub fn merge_map<K, V>(
-    mut map1: BTreeMap<K, V>,
-    mut map2: BTreeMap<K, V>,
-) -> BTreeMap<K, (Option<V>, Option<V>)>
-where
-    K: Ord + Clone,
-{
-    let all_keys = BTreeSet::from_iter(map1.keys().chain(map2.keys()).map(|k| k.clone()));
-    BTreeMap::from_iter(all_keys.into_iter().map(|key| {
-        let e1 = map1.remove(&key);
-        let e2 = map2.remove(&key);
-        (key, (e1, e2))
-    }))
 }
 
 pub mod serde {

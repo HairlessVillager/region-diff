@@ -1,3 +1,9 @@
+mod config;
+mod diff;
+mod log;
+mod mca;
+mod util;
+
 use std::{
     fs,
     io::{self, BufWriter, Write},
@@ -7,15 +13,10 @@ use std::{
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
+    config::{Config, LogConfig, init_config},
     diff::{Diff, file::MCADiff},
     util::serde::{deserialize, serialize},
 };
-
-mod config;
-mod diff;
-mod log;
-mod mca;
-mod util;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -24,8 +25,8 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    verbose: u8,
+    #[arg(short, long)]
+    threads: usize,
 }
 
 #[derive(Subcommand)]
@@ -108,6 +109,10 @@ where
 }
 fn main() {
     let cli = Cli::parse();
+    init_config(Config {
+        log_config: LogConfig::Production,
+        threads: cli.threads,
+    });
     match cli.command {
         Commands::Diff(args) => {
             let old = fs::read(PathBuf::from(args.old)).unwrap();

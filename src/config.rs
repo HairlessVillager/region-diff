@@ -1,16 +1,16 @@
-use std::path::PathBuf;
+#[cfg(not(test))]
+use std::sync::OnceLock;
 
 use crate::log::init_log;
 
-#[derive(Clone)] // 添加 Clone 支持
+#[derive(Clone)]
 pub struct Config {
-    pub backend_url: String,
-    pub base_dir: PathBuf,
-    pub working_dir: PathBuf,
     pub log_config: LogConfig,
+    pub threads: usize,
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub enum LogConfig {
     Trace,
     Production,

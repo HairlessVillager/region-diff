@@ -38,6 +38,7 @@ impl Diff<Vec<u8>> for BlobDiff {
     }
 }
 impl BlobDiff {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::from_compare(&Vec::with_capacity(0), &Vec::with_capacity(0))
     }
@@ -52,12 +53,6 @@ impl BlobDiff {
     }
     pub fn get_new_text(&self) -> &Vec<u8> {
         &self.new_text
-    }
-    pub fn is_creation(&self) -> bool {
-        self.old_text.len() == 0
-    }
-    pub fn is_deletion(&self) -> bool {
-        self.new_text.len() == 0
     }
     pub fn patch0(&self) -> Vec<u8> {
         self.new_text.clone()

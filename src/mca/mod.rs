@@ -16,6 +16,7 @@ struct HeaderEntry {
     timestamp: u32,
 }
 impl HeaderEntry {
+    #[allow(dead_code)]
     fn is_available(&self) -> Result<bool, Box<dyn std::error::Error>> {
         if self.sector_count == 0 && self.sector_offset == 0 {
             Ok(false)
