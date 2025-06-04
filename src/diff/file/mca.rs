@@ -5,13 +5,11 @@ use rayon::{ThreadPoolBuilder, prelude::*};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::compress::CompressionType;
 use crate::{
     diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
     mca::{ChunkWithTimestamp, LazyChunk, MCABuilder, MCAReader},
-    util::{
-        compress::CompressionType, create_chunk_ixz_iter, fastnbt_deserialize as de,
-        fastnbt_serialize as ser,
-    },
+    util::{create_chunk_ixz_iter, fastnbt_deserialize as de, fastnbt_serialize as ser},
 };
 
 #[derive(Debug, Clone, Encode, Decode)]

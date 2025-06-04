@@ -1,5 +1,5 @@
 use super::{ChunkWithTimestamp, SECTOR_SIZE};
-use crate::util::{compress::CompressionType, create_chunk_ixz_iter};
+use crate::{compress::CompressionType, util::create_chunk_ixz_iter};
 
 pub struct MCABuilder<'a> {
     chunks: [Option<&'a ChunkWithTimestamp>; 1024],
@@ -18,8 +18,8 @@ impl<'a> MCABuilder<'a> {
         let header_size = SECTOR_SIZE * 2;
         let chunks_count = self.chunks.iter().filter(|e| e.is_some()).count();
         let chunk_estimated_size = match compression_type {
-            CompressionType::NoCompression => 0x40000, // 128KB
-            _ => 0x8000,                               // 16KB
+            CompressionType::No => 0x40000, // 128KB
+            _ => 0x8000,                    // 16KB
         };
         let mut buffer: Vec<u8> =
             Vec::with_capacity(header_size + chunk_estimated_size * chunks_count);
@@ -39,7 +39,7 @@ impl<'a> MCABuilder<'a> {
                 None => (0, 0, 0, None),
                 Some(chunk) => {
                     let sector_offset = buffer.len() / SECTOR_SIZE;
-                    let compressed_nbt = compression_type.compress(&chunk.nbt).unwrap();
+                    let compressed_nbt = compression_type.compress_all(&chunk.nbt).unwrap();
 
                     // `+ 5` for chunk data header (4 for length and 1 for compression type)
                     // `+ SECTOR_SIZE - 1` for align to SECTOR_SIZE

@@ -1,4 +1,4 @@
-use crate::util::compress::CompressionType;
+use crate::compress::CompressionType;
 
 use super::SECTOR_SIZE;
 
@@ -173,7 +173,7 @@ fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Erro
     let compression_type = sector_buf[4];
     let data = &sector_buf[5..length + 4];
 
-    let nbt = CompressionType::from_magic(compression_type).decompress(data)?;
+    let nbt = CompressionType::from_magic(compression_type).decompress_all(data)?;
     Ok(nbt)
 }
 
