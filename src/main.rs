@@ -43,9 +43,9 @@ struct Cli {
 enum Commands {
     /// Compare two file which have the same type
     Diff(DiffArgs),
-    /// Patch the difference to a old file
+    /// Patch the difference to the old file
     Patch(PatchArgs),
-    /// Revert the difference to a new file
+    /// Revert the difference to the new file
     Revert(RevertArgs),
     /// Squashing two adjacent differences
     Squash(SquashArgs),
@@ -93,8 +93,10 @@ struct SquashArgs {
 
 #[derive(Clone, ValueEnum)]
 enum FileType {
-    /// Minecraft region file
-    Region,
+    /// Minecraft Region File > region/*.mca
+    RegionMca,
+    /// [TODO] Minecraft Region File > region/*.mcc
+    RegionMcc,
 }
 
 fn main() {
@@ -108,10 +110,11 @@ fn main() {
             let old = fs::read(PathBuf::from(args.old)).expect("cannot find old file");
             let new = fs::read(PathBuf::from(args.new)).expect("cannot find new file");
             let diff = match cli.filetype {
-                FileType::Region => {
+                FileType::RegionMca => {
                     let diff = MCADiff::from_compare(&old, &new);
                     serialize(diff)
                 }
+                FileType::RegionMcc => todo!(),
             };
             let mut reader = Cursor::new(diff);
             let mut writer = File::create(PathBuf::from(args.diff)).unwrap();
@@ -126,12 +129,13 @@ fn main() {
             let squashing = fs::read(PathBuf::from(args.squashing)).unwrap();
             let squashing = cli.compression_type.decompress_all(squashing).unwrap();
             let squashed = match cli.filetype {
-                FileType::Region => {
+                FileType::RegionMca => {
                     let base: MCADiff = deserialize(&base);
                     let squashing: MCADiff = deserialize(&squashing);
                     let squashed = MCADiff::from_squash(&base, &squashing);
                     serialize(squashed)
                 }
+                FileType::RegionMcc => todo!(),
             };
             let mut reader = Cursor::new(squashed);
             let mut writer = File::create(PathBuf::from(args.squashed)).unwrap();
@@ -145,10 +149,11 @@ fn main() {
             let diff = fs::read(PathBuf::from(args.diff)).unwrap();
             let diff = cli.compression_type.decompress_all(diff).unwrap();
             let patched = match cli.filetype {
-                FileType::Region => {
+                FileType::RegionMca => {
                     let diff: MCADiff = deserialize(&diff);
                     diff.patch(&old)
                 }
+                FileType::RegionMcc => todo!(),
             };
             let mut reader = Cursor::new(patched);
             let mut writer = File::create(PathBuf::from(args.patched)).unwrap();
@@ -160,10 +165,11 @@ fn main() {
             let diff = fs::read(PathBuf::from(args.diff)).unwrap();
             let diff = cli.compression_type.decompress_all(diff).unwrap();
             let reverted = match cli.filetype {
-                FileType::Region => {
+                FileType::RegionMca => {
                     let diff: MCADiff = deserialize(&diff);
                     diff.revert(&new)
                 }
+                FileType::RegionMcc => todo!(),
             };
             let mut reader = Cursor::new(reverted);
             let mut writer = File::create(PathBuf::from(args.reverted)).unwrap();
