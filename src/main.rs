@@ -7,7 +7,7 @@ mod util;
 
 use std::{
     fs::{self, File},
-    io::{Cursor, Write},
+    io::{self, Cursor, Write},
     path::PathBuf,
 };
 
@@ -152,9 +152,7 @@ fn main() {
             };
             let mut reader = Cursor::new(patched);
             let mut writer = File::create(PathBuf::from(args.patched)).unwrap();
-            cli.compression_type
-                .compress(&mut reader, &mut writer)
-                .unwrap();
+            io::copy(&mut reader, &mut writer).unwrap();
             writer.flush().unwrap();
         }
         Commands::Revert(args) => {
@@ -169,9 +167,7 @@ fn main() {
             };
             let mut reader = Cursor::new(reverted);
             let mut writer = File::create(PathBuf::from(args.reverted)).unwrap();
-            cli.compression_type
-                .compress(&mut reader, &mut writer)
-                .unwrap();
+            io::copy(&mut reader, &mut writer).unwrap();
             writer.flush().unwrap();
         }
     }
