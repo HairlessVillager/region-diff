@@ -1,7 +1,7 @@
 #[cfg(not(test))]
 use std::sync::OnceLock;
 
-use crate::log::init_log;
+use crate::logging::init_log;
 
 #[derive(Clone)]
 pub struct Config {
@@ -13,7 +13,7 @@ pub struct Config {
 #[allow(dead_code)]
 pub enum LogConfig {
     Trace,
-    Production,
+    Verbose(u8),
     NoLog,
 }
 

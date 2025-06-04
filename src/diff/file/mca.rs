@@ -45,11 +45,11 @@ impl Diff<Vec<u8>> for MCADiff {
     where
         Self: Sized,
     {
-        log::debug!("from_compare()...");
+        log::trace!("from_compare()...");
 
         let reader_old = Arc::new(MCAReader::from_bytes(old).unwrap());
         let reader_new = Arc::new(MCAReader::from_bytes(new).unwrap());
-        let enable_cost_stat = log_enabled!(Level::Info);
+        let enable_cost_stat = log_enabled!(Level::Debug);
 
         let mut chunks = vec![ChunkWithTimestampDiff::BothNotExist; 1024];
         let ixz_list = create_chunk_ixz_iter().collect::<Vec<_>>(); // shuffle may helpful or helpless
