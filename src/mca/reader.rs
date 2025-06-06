@@ -4,6 +4,8 @@ use super::SECTOR_SIZE;
 
 use super::{ChunkWithTimestamp, HeaderEntry};
 use std::io::{Cursor, Read, Seek};
+#[cfg(test)]
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum LazyChunk {
@@ -113,7 +115,7 @@ impl<R: Read + Seek> MCAReader<R> {
 
 #[cfg(test)]
 impl MCAReader<std::io::BufReader<std::fs::File>> {
-    pub fn from_file(path: &str, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file(path: &PathBuf, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
         use std::{fs::File, io::BufReader};
 
         let file = File::open(path).map_err(|e| format!("open file failed: {}", &e))?;
@@ -179,7 +181,7 @@ fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Erro
 
 #[cfg(test)]
 mod tests {
-    use crate::util::create_chunk_ixz_iter;
+    use crate::util::{create_chunk_ixz_iter, test::all_file_iter};
 
     use super::*;
     use std::io::Write;
@@ -266,18 +268,12 @@ mod tests {
 
     #[test]
     fn test_real_files_reading() {
-        let paths: Vec<&'static str> = vec![
-            "./resources/mca/r.1.2.20250511.mca",
-            "./resources/mca/r.1.2.20250512.mca",
-            "./resources/mca/r.1.2.20250513.mca",
-            "./resources/mca/r.1.2.20250514.mca",
-            "./resources/mca/r.1.2.20250515.mca",
-            "./resources/mca/r.1.2.20250516.mca",
-        ];
-        for path in paths {
-            let mut reader = MCAReader::from_file(path, false).unwrap();
-            for (_, x, z) in create_chunk_ixz_iter() {
-                let _ = reader.get_chunk(x, z).unwrap();
+        for paths in all_file_iter(crate::FileType::RegionMca) {
+            for path in paths {
+                let mut reader = MCAReader::from_file(&path, false).unwrap();
+                for (_, x, z) in create_chunk_ixz_iter() {
+                    let _ = reader.get_chunk(x, z).unwrap();
+                }
             }
         }
     }

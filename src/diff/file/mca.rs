@@ -383,14 +383,15 @@ impl Diff<Vec<u8>> for MCADiff {
 }
 #[cfg(test)]
 mod tests {
-    use rand::prelude::*;
+    use std::{fs, path::PathBuf};
 
-    use super::*;
     use crate::{
         config::{Config, with_test_config},
         mca::{LazyChunk, MCAReader},
-        util::test::{build_test_mca_with_one_chunk, rearranged_nbt},
+        util::test::{all_file_cp2_iter, all_file_cp3_iter, assert_mca_eq, rearranged_nbt},
     };
+
+    use super::*;
 
     static TEST_CONFIG: Config = Config {
         log_config: crate::config::LogConfig::NoLog,
@@ -398,15 +399,17 @@ mod tests {
     };
 
     #[test]
+    #[ignore = "replace test mca files"]
     fn test_mca_timestamp_nbt() {
         with_test_config(TEST_CONFIG.clone(), || {
-            // TODO: replace test mca files
             let reader_old =
-                MCAReader::from_file("./resources/mca/r.1.2.20250511.mca", false).unwrap();
+                MCAReader::from_file(&PathBuf::from("./resources/mca/r.1.2.20250511.mca"), false)
+                    .unwrap();
             let reader_new =
-                MCAReader::from_file("./resources/mca/r.1.2.20250512.mca", false).unwrap();
-            let mut _ts_changed_chunk_count = 0;
-            let mut _ts_unchanged_chunk_count = 0;
+                MCAReader::from_file(&PathBuf::from("./resources/mca/r.1.2.20250512.mca"), false)
+                    .unwrap();
+            let mut ts_changed_chunk_count = 0;
+            let mut ts_unchanged_chunk_count = 0;
             for (_, x, z) in create_chunk_ixz_iter() {
                 let (timestamp_old, nbt_old) = match reader_old.get_chunk_lazily(x, z) {
                     LazyChunk::Some(chunk) => {
@@ -421,149 +424,62 @@ mod tests {
                     _ => panic!("chunk should loaded"),
                 };
                 if timestamp_old == timestamp_new {
-                    _ts_unchanged_chunk_count += 1;
+                    ts_unchanged_chunk_count += 1;
                     assert_eq!(nbt_old, nbt_new);
                 } else {
-                    _ts_changed_chunk_count += 1;
+                    ts_changed_chunk_count += 1;
                     assert_ne!(nbt_old, nbt_new);
                 }
             }
-            // assert!(ts_changed_chunk_count > 20);
-            // assert!(ts_unchanged_chunk_count > 20);
+            assert!(ts_changed_chunk_count > 20);
+            assert!(ts_unchanged_chunk_count > 20);
         });
     }
-    mod test_in_continuous_data {
-        use crate::util::test::{assert_mca_eq, build_test_mca};
-
-        use super::*;
-        #[test]
-        fn test_diff_patch_revert() {
-            with_test_config(TEST_CONFIG.clone(), || {
-                let paths = [
-                    "./resources/mca/r.1.2.20250511.mca",
-                    "./resources/mca/r.1.2.20250512.mca",
-                    "./resources/mca/r.1.2.20250513.mca",
-                    "./resources/mca/r.1.2.20250514.mca",
-                    "./resources/mca/r.1.2.20250515.mca",
-                    "./resources/mca/r.1.2.20250516.mca",
-                ];
-                let seed = 114514;
-                let rng = StdRng::seed_from_u64(seed);
-                for path_old_new in paths.windows(2) {
-                    let old = build_test_mca(path_old_new[0], 100, &mut rng.clone());
-                    let new = build_test_mca(path_old_new[1], 100, &mut rng.clone());
-                    let diff = MCADiff::from_compare(&old, &new);
-                    let patched_old = diff.patch(&old);
-                    let reverted_new = diff.revert(&new);
-
-                    assert_mca_eq(&new, &patched_old);
-                    assert_mca_eq(&old, &reverted_new);
-                }
-            });
-        }
-        #[test]
-        fn test_diff_squash() {
-            with_test_config(TEST_CONFIG.clone(), || {
-                let paths = [
-                    "./resources/mca/r.1.2.20250511.mca",
-                    "./resources/mca/r.1.2.20250512.mca",
-                    "./resources/mca/r.1.2.20250513.mca",
-                    "./resources/mca/r.1.2.20250514.mca",
-                    "./resources/mca/r.1.2.20250515.mca",
-                    "./resources/mca/r.1.2.20250516.mca",
-                ];
-                let seed = 114514;
-                let rng = StdRng::seed_from_u64(seed);
-                for path_old_new in paths.windows(3) {
-                    let v0 = build_test_mca(path_old_new[0], 50, &mut rng.clone());
-                    let v1 = build_test_mca(path_old_new[1], 50, &mut rng.clone());
-                    let v2 = build_test_mca(path_old_new[2], 50, &mut rng.clone());
-                    let diff_v01 = MCADiff::from_compare(&v0, &v1);
-                    let diff_v12 = MCADiff::from_compare(&v1, &v2);
-                    let squashed_diff = MCADiff::from_squash(&diff_v01, &diff_v12);
-                    let patched_v0 = squashed_diff.patch(&v0);
-                    let reverted_v2 = squashed_diff.revert(&v2);
-
-                    assert_mca_eq(&v2, &patched_v0);
-                    assert_mca_eq(&v0, &reverted_v2);
-                }
-            });
-        }
-    }
-    mod test_in_noncontinuous_data {
-        use crate::util::test::{assert_mca_eq, build_test_mca};
-
-        use super::*;
-        #[test]
-        fn test_diff_patch_revert() {
-            with_test_config(TEST_CONFIG.clone(), || {
-                let paths = [
-                    "./resources/mca/r.1.2.20250511.mca",
-                    "./resources/mca/r.1.2.20250512.mca",
-                    "./resources/mca/r.1.2.20250513.mca",
-                    "./resources/mca/r.1.2.20250514.mca",
-                    "./resources/mca/r.1.2.20250515.mca",
-                    "./resources/mca/r.1.2.20250516.mca",
-                ];
-                let seed = 114514;
-                let mut rng = StdRng::seed_from_u64(seed);
-                for path_old_new in paths.windows(2) {
-                    let old = build_test_mca(path_old_new[0], 100, &mut rng);
-                    let new = build_test_mca(path_old_new[1], 100, &mut rng);
-                    let diff = MCADiff::from_compare(&old, &new);
-                    let patched_old = diff.patch(&old);
-                    let reverted_new = diff.revert(&new);
-
-                    assert_mca_eq(&new, &patched_old);
-                    assert_mca_eq(&old, &reverted_new);
-                }
-            });
-        }
-        #[test]
-        fn test_diff_squash() {
-            with_test_config(TEST_CONFIG.clone(), || {
-                let paths = [
-                    "./resources/mca/r.1.2.20250511.mca",
-                    "./resources/mca/r.1.2.20250512.mca",
-                    "./resources/mca/r.1.2.20250513.mca",
-                    "./resources/mca/r.1.2.20250514.mca",
-                    "./resources/mca/r.1.2.20250515.mca",
-                    "./resources/mca/r.1.2.20250516.mca",
-                ];
-                let seed = 114514;
-                let mut rng = StdRng::seed_from_u64(seed);
-                for path_old_new in paths.windows(3) {
-                    let v0 = build_test_mca(path_old_new[0], 50, &mut rng);
-                    rng.next_u32();
-                    let v1 = build_test_mca(path_old_new[1], 50, &mut rng);
-                    rng.next_u32();
-                    let v2 = build_test_mca(path_old_new[2], 50, &mut rng);
-                    rng.next_u32();
-
-                    let diff_v01 = MCADiff::from_compare(&v0, &v1);
-                    let diff_v12 = MCADiff::from_compare(&v1, &v2);
-                    let squashed_diff = MCADiff::from_squash(&diff_v01, &diff_v12);
-                    let patched_v0 = squashed_diff.patch(&v0);
-                    let reverted_v2 = squashed_diff.revert(&v2);
-
-                    assert_mca_eq(&v2, &patched_v0);
-                    assert_mca_eq(&v0, &reverted_v2);
-                }
-            });
-        }
-    }
-
     #[test]
+    fn test_diff_patch_revert() {
+        with_test_config(TEST_CONFIG.clone(), || {
+            for paths in all_file_cp2_iter(crate::FileType::RegionMca) {
+                for (old_path, new_path) in paths {
+                    let old = fs::read(old_path).unwrap();
+                    let new = fs::read(new_path).unwrap();
+                    let diff = MCADiff::from_compare(&old, &new);
+                    let patched_old = diff.patch(&old);
+                    let reverted_new = diff.revert(&new);
+                    assert_mca_eq(&new, &patched_old);
+                    assert_mca_eq(&old, &reverted_new);
+                }
+            }
+        });
+    }
+    #[test]
+    fn test_diff_squash() {
+        with_test_config(TEST_CONFIG.clone(), || {
+            for paths in all_file_cp3_iter(crate::FileType::RegionMca) {
+                for (v0_path, v1_path, v2_path) in paths {
+                    let v0 = fs::read(v0_path).unwrap();
+                    let v1 = fs::read(v1_path).unwrap();
+                    let v2 = fs::read(v2_path).unwrap();
+                    let diff_v01 = MCADiff::from_compare(&v0, &v1);
+                    let diff_v12 = MCADiff::from_compare(&v1, &v2);
+                    let squashed_diff = MCADiff::from_squash(&diff_v01, &diff_v12);
+                    let patched_v0 = squashed_diff.patch(&v0);
+                    let reverted_v2 = squashed_diff.revert(&v2);
+                    assert_mca_eq(&v2, &patched_v0);
+                    assert_mca_eq(&v0, &reverted_v2);
+                }
+            }
+        });
+    }
+    #[test]
+    #[ignore = "use benchmark test"]
     fn test_time_cost() {
         // The next performance hotspot is the diff of sections, but since the
         // current performance is already good enough, I don't plan to
         // optimize this area in the near future.
         with_test_config(TEST_CONFIG.clone(), || {
             log::debug!("reading files...");
-            // let a = fs::read("./resources/mca/r.1.2.20250515.mca").unwrap();
-            // let b = fs::read("./resources/mca/r.1.2.20250516.mca").unwrap();
-            let a = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250515.mca", 27, 26);
-            let b = build_test_mca_with_one_chunk("./resources/mca/r.1.2.20250516.mca", 27, 26);
+            let a = fs::read("./resources/mca/r.1.2.20250515.mca").unwrap();
+            let b = fs::read("./resources/mca/r.1.2.20250516.mca").unwrap();
             MCADiff::from_compare(&a, &b);
         });
     }
