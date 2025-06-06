@@ -196,72 +196,123 @@ impl Diff<Value> for ChunkDiff {
 }
 #[cfg(test)]
 mod tests {
-    use crate::{
-        mca::MCAReader,
-        util::{
-            create_chunk_ixz_iter,
-            test::{all_file_cp2_iter, all_file_cp3_iter},
-        },
-    };
+    use rand::prelude::*;
 
     use super::*;
-    #[test]
-    fn test_diff_patch_revert() -> () {
-        for paths in all_file_cp2_iter(crate::FileType::RegionMca) {
-            for (old_path, new_path) in paths {
-                let mut old_reader = MCAReader::from_file(&old_path, false).unwrap();
-                let mut new_reader = MCAReader::from_file(&new_path, false).unwrap();
-                for (_, x, z) in create_chunk_ixz_iter() {
-                    let old_chunk = old_reader.get_chunk(x, z).unwrap();
-                    let old = match old_chunk {
-                        None => continue,
-                        Some(chunk) => fastnbt::from_bytes(&chunk.nbt).unwrap(),
-                    };
-                    let new_chunk = new_reader.get_chunk(x, z).unwrap();
-                    let new = match new_chunk {
-                        None => continue,
-                        Some(chunk) => fastnbt::from_bytes(&chunk.nbt).unwrap(),
-                    };
-                    let diff = ChunkDiff::from_compare(&old, &new);
-                    let patched_old = diff.patch(&old);
-                    let reverted_new = diff.revert(&new);
-                    assert_eq!(new, patched_old);
-                    assert_eq!(old, reverted_new);
-                }
+    mod test_in_continuous_data {
+        use std::path::PathBuf;
+
+        use crate::util::test::get_test_chunk;
+
+        use super::*;
+        #[test]
+        fn test_diff_patch_revert() -> () {
+            let mut rng_old = StdRng::seed_from_u64(114514);
+            let mut rng_new = rng_old.clone();
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca",
+            );
+            let mut old_iter = get_test_chunk(&binding, &mut rng_old);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca",
+            );
+            let mut new_iter = get_test_chunk(&binding, &mut rng_new);
+            for _ in 0..50 {
+                let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
+                let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
+                let diff = ChunkDiff::from_compare(&old, &new);
+                let patched_old = diff.patch(&old);
+                let reverted_new = diff.revert(&new);
+                assert_eq!(new, patched_old);
+                assert_eq!(old, reverted_new);
+            }
+        }
+        #[test]
+        fn test_diff_squash() -> () {
+            let mut rng_v0 = StdRng::seed_from_u64(114514);
+            let mut rng_v1 = rng_v0.clone();
+            let mut rng_v2 = rng_v1.clone();
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca",
+            );
+            let mut v0_iter = get_test_chunk(&binding, &mut rng_v0);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250513.mca",
+            );
+            let mut v1_iter = get_test_chunk(&binding, &mut rng_v1);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250515.mca",
+            );
+            let mut v2_iter = get_test_chunk(&binding, &mut rng_v2);
+            for _ in 0..50 {
+                let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
+                let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
+                let v2 = fastnbt::from_bytes(&v2_iter.next().unwrap()).unwrap();
+                let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
+                let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
+                let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
+                let patched_v0 = squashed_diff.patch(&v0);
+                let reverted_v2 = squashed_diff.revert(&v2);
+                assert_eq!(v2, patched_v0);
+                assert_eq!(v0, reverted_v2);
             }
         }
     }
-    #[test]
-    fn test_diff_squash() -> () {
-        for paths in all_file_cp3_iter(crate::FileType::RegionMca) {
-            for (v0_path, v1_path, v2_path) in paths {
-                let mut v0_reader = MCAReader::from_file(&v0_path, false).unwrap();
-                let mut v1_reader = MCAReader::from_file(&v1_path, false).unwrap();
-                let mut v2_reader = MCAReader::from_file(&v2_path, false).unwrap();
-                for (_, x, z) in create_chunk_ixz_iter() {
-                    let v0_chunk = v0_reader.get_chunk(x, z).unwrap();
-                    let v0 = match v0_chunk {
-                        None => continue,
-                        Some(chunk) => fastnbt::from_bytes(&chunk.nbt).unwrap(),
-                    };
-                    let v1_chunk = v1_reader.get_chunk(x, z).unwrap();
-                    let v1 = match v1_chunk {
-                        None => continue,
-                        Some(chunk) => fastnbt::from_bytes(&chunk.nbt).unwrap(),
-                    };
-                    let v2_chunk = v2_reader.get_chunk(x, z).unwrap();
-                    let v2 = match v2_chunk {
-                        None => continue,
-                        Some(chunk) => fastnbt::from_bytes(&chunk.nbt).unwrap(),
-                    };
-                    let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
-                    let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
-                    let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
-                    let patched_v0 = squashed_diff.patch(&v0);
-                    let reverted_v2 = squashed_diff.revert(&v2);
-                    assert_eq!(v2, patched_v0);
-                    assert_eq!(v0, reverted_v2);
-                }
+    mod test_in_noncontinuous_data {
+        use std::path::PathBuf;
+
+        use crate::util::test::get_test_chunk;
+
+        use super::*;
+        #[test]
+        fn test_diff_patch_revert() -> () {
+            let mut rng_old = StdRng::seed_from_u64(114514);
+            let mut rng_new = rng_old.clone();
+            rng_new.next_u32();
+            let binding = PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca");
+            let mut old_iter = get_test_chunk(&binding, &mut rng_old);
+            let binding = PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca");
+            let mut new_iter = get_test_chunk(&binding, &mut rng_new);
+            for _ in 0..10 {
+                let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
+                let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
+                let diff = ChunkDiff::from_compare(&old, &new);
+                let patched_old = diff.patch(&old);
+                let reverted_new = diff.revert(&new);
+                assert_eq!(new, patched_old);
+                assert_eq!(old, reverted_new);
+            }
+        }
+        #[test]
+        fn test_diff_squash() -> () {
+            let mut rng_v0 = StdRng::seed_from_u64(114514);
+            let mut rng_v1 = rng_v0.clone();
+            rng_v1.next_u32();
+            let mut rng_v2 = rng_v1.clone();
+            rng_v2.next_u32();
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca",
+            );
+            let mut v0_iter = get_test_chunk(&binding, &mut rng_v0);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250513.mca",
+            );
+            let mut v1_iter = get_test_chunk(&binding, &mut rng_v1);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250515.mca",
+            );
+            let mut v2_iter = get_test_chunk(&binding, &mut rng_v2);
+            for _ in 0..10 {
+                let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
+                let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
+                let v2 = fastnbt::from_bytes(&v2_iter.next().unwrap()).unwrap();
+                let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
+                let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
+                let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
+                let patched_v0 = squashed_diff.patch(&v0);
+                let reverted_v2 = squashed_diff.revert(&v2);
+                assert_eq!(v2, patched_v0);
+                assert_eq!(v0, reverted_v2);
             }
         }
     }

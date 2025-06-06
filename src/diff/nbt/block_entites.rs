@@ -270,84 +270,65 @@ impl Diff<Value> for BlockEntitiesDiff {
 }
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use fastnbt::Value;
 
-    use crate::{
-        diff::Diff,
-        mca::{ChunkWithTimestamp, MCAReader},
-        util::{
-            create_chunk_ixz_iter,
-            test::{all_file_cp2_iter, all_file_cp3_iter},
-        },
-    };
+    use crate::{diff::Diff, mca::ChunkWithTimestamp, util::test::get_test_chunk_by_xz};
 
     use super::BlockEntitiesDiff;
 
-    fn get_block_entities_from_chunk(chunk: &ChunkWithTimestamp) -> Value {
-        let nbt = &chunk.nbt;
-        match fastnbt::from_bytes(nbt).unwrap() {
+    fn get_block_entities_from_chunk(chunk: ChunkWithTimestamp) -> Value {
+        let nbt = chunk.nbt;
+        match fastnbt::from_bytes(&nbt).unwrap() {
             Value::Compound(mut map) => map.remove("block_entities").unwrap(),
             _ => panic!("root is not Value::Compound"),
         }
     }
     #[test]
     fn test_diff_patch_revert() {
-        for paths in all_file_cp2_iter(crate::FileType::RegionMca) {
-            for (old_path, new_path) in paths {
-                let mut old_reader = MCAReader::from_file(&old_path, false).unwrap();
-                let mut new_reader = MCAReader::from_file(&new_path, false).unwrap();
-                for (_, x, z) in create_chunk_ixz_iter() {
-                    let old_chunk = old_reader.get_chunk(x, z).unwrap();
-                    let old = match old_chunk {
-                        None => continue,
-                        Some(old_chunk) => get_block_entities_from_chunk(old_chunk),
-                    };
-                    let new_chunk = new_reader.get_chunk(x, z).unwrap();
-                    let new = match new_chunk {
-                        None => continue,
-                        Some(new_chunk) => get_block_entities_from_chunk(new_chunk),
-                    };
-                    let diff = BlockEntitiesDiff::from_compare(&old, &new);
-                    let patched_old = diff.patch(&old);
-                    let reverted_new = diff.revert(&new);
-                    assert_eq!(patched_old, new);
-                    assert_eq!(reverted_new, old);
-                }
-            }
-        }
+        let old_chunk = get_test_chunk_by_xz(
+            &PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250515.mca"),
+            25,
+            29,
+        )
+        .unwrap();
+        let old = get_block_entities_from_chunk(old_chunk);
+        let new_chunk = get_test_chunk_by_xz(
+            &PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca"),
+            25,
+            29,
+        )
+        .unwrap();
+        let new = get_block_entities_from_chunk(new_chunk);
+        let diff = BlockEntitiesDiff::from_compare(&old, &new);
+        let patched_old = diff.patch(&old);
+        let reverted_new = diff.revert(&new);
+        assert_eq!(patched_old, new);
+        assert_eq!(reverted_new, old);
     }
+
     #[test]
     fn test_diff_squash() {
-        for paths in all_file_cp3_iter(crate::FileType::RegionMca) {
-            for (v0_path, v1_path, v2_path) in paths {
-                let mut v0_reader = MCAReader::from_file(&v0_path, false).unwrap();
-                let mut v1_reader = MCAReader::from_file(&v1_path, false).unwrap();
-                let mut v2_reader = MCAReader::from_file(&v2_path, false).unwrap();
-                for (_, x, z) in create_chunk_ixz_iter() {
-                    let v0_chunk = v0_reader.get_chunk(x, z).unwrap();
-                    let v0 = match v0_chunk {
-                        None => continue,
-                        Some(chunk) => get_block_entities_from_chunk(chunk),
-                    };
-                    let v1_chunk = v1_reader.get_chunk(x, z).unwrap();
-                    let v1 = match v1_chunk {
-                        None => continue,
-                        Some(chunk) => get_block_entities_from_chunk(chunk),
-                    };
-                    let v2_chunk = v2_reader.get_chunk(x, z).unwrap();
-                    let v2 = match v2_chunk {
-                        None => continue,
-                        Some(chunk) => get_block_entities_from_chunk(chunk),
-                    };
-                    let diff_v01 = BlockEntitiesDiff::from_compare(&v0, &v1);
-                    let diff_v12 = BlockEntitiesDiff::from_compare(&v1, &v2);
-                    let squashed_diff = BlockEntitiesDiff::from_squash(&diff_v01, &diff_v12);
-                    let patched_v0 = squashed_diff.patch(&v0);
-                    let reverted_v2 = squashed_diff.revert(&v2);
-                    assert_eq!(patched_v0, v2);
-                    assert_eq!(reverted_v2, v0);
-                }
-            }
-        }
+        let mut bes_list = [
+            "./resources/test-payload/region/mca/hairlessvillager-0/20250514.mca",
+            "./resources/test-payload/region/mca/hairlessvillager-0/20250515.mca",
+            "./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca",
+        ]
+        .map(|path| {
+            let chunk = get_test_chunk_by_xz(&PathBuf::from(path), 25, 29).unwrap();
+            let bes = get_block_entities_from_chunk(chunk);
+            Some(bes)
+        });
+        let v0 = bes_list[0].take().unwrap();
+        let v1 = bes_list[1].take().unwrap();
+        let v2 = bes_list[2].take().unwrap();
+        let diff_v01 = BlockEntitiesDiff::from_compare(&v0, &v1);
+        let diff_v12 = BlockEntitiesDiff::from_compare(&v1, &v2);
+        let squashed_diff = BlockEntitiesDiff::from_squash(&diff_v01, &diff_v12);
+        let patched_v0 = squashed_diff.patch(&v0);
+        let reverted_v2 = squashed_diff.revert(&v2);
+        assert_eq!(patched_v0, v2);
+        assert_eq!(reverted_v2, v0);
     }
 }

@@ -84,7 +84,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_to_bytes() {
-        let mca_0 = fs::read("./resources/mca/r.1.2.20250516.mca").unwrap();
+        let mca_0 = fs::read("./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca").unwrap();
 
         let reader_0 = MCAReader::from_bytes(&mca_0).unwrap();
         let mut builder_0 = MCABuilder::new();

@@ -402,12 +402,20 @@ mod tests {
     #[ignore = "replace test mca files"]
     fn test_mca_timestamp_nbt() {
         with_test_config(TEST_CONFIG.clone(), || {
-            let reader_old =
-                MCAReader::from_file(&PathBuf::from("./resources/mca/r.1.2.20250511.mca"), false)
-                    .unwrap();
-            let reader_new =
-                MCAReader::from_file(&PathBuf::from("./resources/mca/r.1.2.20250512.mca"), false)
-                    .unwrap();
+            let reader_old = MCAReader::from_file(
+                &PathBuf::from(
+                    "./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca",
+                ),
+                false,
+            )
+            .unwrap();
+            let reader_new = MCAReader::from_file(
+                &PathBuf::from(
+                    "./resources/test-payload/region/mca/hairlessvillager-0/20250512.mca",
+                ),
+                false,
+            )
+            .unwrap();
             let mut ts_changed_chunk_count = 0;
             let mut ts_unchanged_chunk_count = 0;
             for (_, x, z) in create_chunk_ixz_iter() {
