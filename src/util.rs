@@ -38,16 +38,54 @@ pub mod serde {
 
 #[cfg(test)]
 pub mod test {
+    use std::{fs, path::PathBuf};
+
     use fastnbt::Value;
     use rand::prelude::*;
 
     use crate::{
-        compress::CompressionType,
-        mca::{ChunkWithTimestamp, LazyChunk, MCABuilder, MCAReader},
+        FileType,
+        mca::{ChunkWithTimestamp, MCAReader},
     };
 
     use super::create_chunk_ixz_iter;
 
+    fn file_type_to_path(file_type: FileType) -> PathBuf {
+        let mut path = PathBuf::from("resources/test-payload");
+        path.push(PathBuf::from(match file_type {
+            FileType::RegionMca => "region/mca",
+            FileType::RegionMcc => todo!(),
+        }));
+        path
+    }
+    pub fn all_file_iter(
+        file_type: FileType,
+    ) -> impl Iterator<Item = impl Iterator<Item = PathBuf>> {
+        let path = file_type_to_path(file_type);
+        fs::read_dir(path).unwrap().filter_map(|entry| {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                Some(fs::read_dir(path).unwrap().filter_map(|entry| {
+                    let entry = entry.unwrap();
+                    let path = entry.path();
+                    if path.is_file() { Some(path) } else { None }
+                }))
+            } else {
+                None
+            }
+        })
+    }
+    #[allow(dead_code)]
+    pub fn file_iter(file_type: FileType, name: String) -> impl Iterator<Item = PathBuf> {
+        let mut path = file_type_to_path(file_type);
+        path.push(PathBuf::from(name));
+        fs::read_dir(path).unwrap().filter_map(|entry| {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_file() { Some(path) } else { None }
+        })
+    }
     pub fn rearranged_nbt(bytes: &Vec<u8>) -> Result<Vec<u8>, fastnbt::error::Error> {
         let de: fastnbt::Value = fastnbt::from_bytes(&bytes)?;
         let sorted = fastnbt::to_bytes(&de)?;
@@ -65,31 +103,6 @@ pub mod test {
             }
             bytes
         })
-    }
-    pub fn build_test_mca(path: &str, chunks: usize, rng: &mut StdRng) -> Vec<u8> {
-        let avaliable_indexes: Vec<_> = create_chunk_ixz_iter().collect();
-        let reader = MCAReader::from_file(path, false).unwrap();
-        let mut builder = MCABuilder::new();
-        for (_, x, z) in avaliable_indexes.into_iter().choose_multiple(rng, chunks) {
-            let chunk = reader.get_chunk_lazily(x, z);
-            if let LazyChunk::Some(chunk) = chunk {
-                builder.set_chunk(x, z, chunk);
-            } else {
-                panic!("chunk is not avaliable");
-            }
-        }
-        builder.to_bytes(CompressionType::Zlib)
-    }
-    pub fn build_test_mca_with_one_chunk(path: &str, x: usize, z: usize) -> Vec<u8> {
-        let reader = MCAReader::from_file(path, false).unwrap();
-        let mut builder = MCABuilder::new();
-        let chunk = reader.get_chunk_lazily(x, z);
-        if let LazyChunk::Some(chunk) = chunk {
-            builder.set_chunk(x, z, chunk);
-        } else {
-            panic!("chunk is not avaliable");
-        }
-        builder.to_bytes(CompressionType::Zlib)
     }
     pub fn assert_mca_eq(a: &[u8], b: &[u8]) {
         let mut reader_a = MCAReader::from_bytes(a).unwrap();
@@ -116,7 +129,7 @@ pub mod test {
             }
         }
     }
-    pub fn get_test_chunk(path: &str, rng: &mut StdRng) -> impl Iterator<Item = Vec<u8>> {
+    pub fn get_test_chunk(path: &PathBuf, rng: &mut StdRng) -> impl Iterator<Item = Vec<u8>> {
         let mut reader = MCAReader::from_file(path, false).unwrap();
         let mut xzs = [(0, 0); 1024];
         for (i, x, z) in create_chunk_ixz_iter() {
@@ -126,8 +139,8 @@ pub mod test {
         xzs.into_iter()
             .map(move |(x, z)| reader.get_chunk(x, z).unwrap().unwrap().nbt.clone())
     }
-    pub fn get_test_chunk_by_xz(path: &str, x: usize, z: usize) -> ChunkWithTimestamp {
+    pub fn get_test_chunk_by_xz(path: &PathBuf, x: usize, z: usize) -> Option<ChunkWithTimestamp> {
         let mut reader = MCAReader::from_file(path, false).unwrap();
-        reader.get_chunk(x, z).unwrap().unwrap().clone()
+        reader.get_chunk(x, z).unwrap().cloned()
     }
 }

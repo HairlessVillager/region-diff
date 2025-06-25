@@ -270,6 +270,8 @@ impl Diff<Value> for BlockEntitiesDiff {
 }
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use fastnbt::Value;
 
     use crate::{diff::Diff, mca::ChunkWithTimestamp, util::test::get_test_chunk_by_xz};
@@ -285,9 +287,19 @@ mod tests {
     }
     #[test]
     fn test_diff_patch_revert() {
-        let old_chunk = get_test_chunk_by_xz("./resources/mca/r.1.2.20250515.mca", 25, 29);
+        let old_chunk = get_test_chunk_by_xz(
+            &PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250515.mca"),
+            25,
+            29,
+        )
+        .unwrap();
         let old = get_block_entities_from_chunk(old_chunk);
-        let new_chunk = get_test_chunk_by_xz("./resources/mca/r.1.2.20250516.mca", 25, 29);
+        let new_chunk = get_test_chunk_by_xz(
+            &PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca"),
+            25,
+            29,
+        )
+        .unwrap();
         let new = get_block_entities_from_chunk(new_chunk);
         let diff = BlockEntitiesDiff::from_compare(&old, &new);
         let patched_old = diff.patch(&old);
@@ -299,12 +311,12 @@ mod tests {
     #[test]
     fn test_diff_squash() {
         let mut bes_list = [
-            "./resources/mca/r.1.2.20250514.mca",
-            "./resources/mca/r.1.2.20250515.mca",
-            "./resources/mca/r.1.2.20250516.mca",
+            "./resources/test-payload/region/mca/hairlessvillager-0/20250514.mca",
+            "./resources/test-payload/region/mca/hairlessvillager-0/20250515.mca",
+            "./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca",
         ]
         .map(|path| {
-            let chunk = get_test_chunk_by_xz(path, 25, 29);
+            let chunk = get_test_chunk_by_xz(&PathBuf::from(path), 25, 29).unwrap();
             let bes = get_block_entities_from_chunk(chunk);
             Some(bes)
         });

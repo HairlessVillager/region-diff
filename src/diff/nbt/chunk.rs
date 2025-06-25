@@ -200,6 +200,8 @@ mod tests {
 
     use super::*;
     mod test_in_continuous_data {
+        use std::path::PathBuf;
+
         use crate::util::test::get_test_chunk;
 
         use super::*;
@@ -207,8 +209,14 @@ mod tests {
         fn test_diff_patch_revert() -> () {
             let mut rng_old = StdRng::seed_from_u64(114514);
             let mut rng_new = rng_old.clone();
-            let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_old);
-            let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", &mut rng_new);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca",
+            );
+            let mut old_iter = get_test_chunk(&binding, &mut rng_old);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca",
+            );
+            let mut new_iter = get_test_chunk(&binding, &mut rng_new);
             for _ in 0..50 {
                 let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
                 let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
@@ -224,9 +232,18 @@ mod tests {
             let mut rng_v0 = StdRng::seed_from_u64(114514);
             let mut rng_v1 = rng_v0.clone();
             let mut rng_v2 = rng_v1.clone();
-            let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_v0);
-            let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
-            let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca",
+            );
+            let mut v0_iter = get_test_chunk(&binding, &mut rng_v0);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250513.mca",
+            );
+            let mut v1_iter = get_test_chunk(&binding, &mut rng_v1);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250515.mca",
+            );
+            let mut v2_iter = get_test_chunk(&binding, &mut rng_v2);
             for _ in 0..50 {
                 let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
                 let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
@@ -242,6 +259,8 @@ mod tests {
         }
     }
     mod test_in_noncontinuous_data {
+        use std::path::PathBuf;
+
         use crate::util::test::get_test_chunk;
 
         use super::*;
@@ -250,8 +269,10 @@ mod tests {
             let mut rng_old = StdRng::seed_from_u64(114514);
             let mut rng_new = rng_old.clone();
             rng_new.next_u32();
-            let mut old_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_old);
-            let mut new_iter = get_test_chunk("./resources/mca/r.1.2.20250516.mca", &mut rng_new);
+            let binding = PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca");
+            let mut old_iter = get_test_chunk(&binding, &mut rng_old);
+            let binding = PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca");
+            let mut new_iter = get_test_chunk(&binding, &mut rng_new);
             for _ in 0..10 {
                 let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
                 let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
@@ -269,9 +290,18 @@ mod tests {
             rng_v1.next_u32();
             let mut rng_v2 = rng_v1.clone();
             rng_v2.next_u32();
-            let mut v0_iter = get_test_chunk("./resources/mca/r.1.2.20250511.mca", &mut rng_v0);
-            let mut v1_iter = get_test_chunk("./resources/mca/r.1.2.20250513.mca", &mut rng_v1);
-            let mut v2_iter = get_test_chunk("./resources/mca/r.1.2.20250515.mca", &mut rng_v2);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca",
+            );
+            let mut v0_iter = get_test_chunk(&binding, &mut rng_v0);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250513.mca",
+            );
+            let mut v1_iter = get_test_chunk(&binding, &mut rng_v1);
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250515.mca",
+            );
+            let mut v2_iter = get_test_chunk(&binding, &mut rng_v2);
             for _ in 0..10 {
                 let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
                 let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
