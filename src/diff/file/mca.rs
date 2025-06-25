@@ -308,6 +308,7 @@ impl Diff<Vec<u8>> for MCADiff {
                         .expect("timestamp overflow"),
                     nbt: ser(&chunk_diff.patch(&de(&old_chunk.nbt))),
                 }),
+                (LazyChunk::Some(old_chunk),ChunkWithTimestampDiff::NoChange)=>Some(old_chunk.clone()),
                 (LazyChunk::Some(_), diff) => panic!(
                     "Invalid diff for existing chunk: {}",
                     diff.get_description()
@@ -364,6 +365,7 @@ impl Diff<Vec<u8>> for MCADiff {
                         .expect("timestamp overflow"),
                     nbt: ser(&chunk_diff.revert(&de(&new_chunk.nbt))),
                 }),
+                (ChunkWithTimestampDiff::NoChange, LazyChunk::Some(new_chunk)) => Some(new_chunk.clone()),
                 (diff, LazyChunk::Some(_)) => panic!(
                     "Invalid diff for existing chunk: {}",
                     diff.get_description()
