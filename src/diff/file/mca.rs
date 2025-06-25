@@ -1,16 +1,15 @@
-use bincode::{Decode, Encode};
-use log::{Level, log_enabled};
-use rayon::{ThreadPoolBuilder, prelude::*};
-
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
 use crate::compress::CompressionType;
+use crate::util::IXZ;
 use crate::{
     diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
     mca::{ChunkWithTimestamp, LazyChunk, MCABuilder, MCAReader},
     util::{create_chunk_ixz_iter, fastnbt_deserialize as de, fastnbt_serialize as ser},
 };
+use bincode::{Decode, Encode};
+use log::{Level, log_enabled};
+use rayon::{ThreadPoolBuilder, prelude::*};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Encode, Decode)]
 enum ChunkWithTimestampDiff {
@@ -40,43 +39,87 @@ pub struct MCADiff {
     chunks: Vec<ChunkWithTimestampDiff>,
 }
 
-impl Diff<Vec<u8>> for MCADiff {
-    fn from_compare(old: &Vec<u8>, new: &Vec<u8>) -> Self
-    where
-        Self: Sized,
-    {
-        log::trace!("from_compare()...");
+fn parallel_process<F, R>(process_func: F) -> Vec<(IXZ, R, Option<Duration>)>
+where
+    F: Fn(IXZ) -> R + Sync + Send,
+    R: Send,
+{
+    let ixz_list = create_chunk_ixz_iter().collect::<Vec<_>>();
+    // ixz_list.shuffle(...);
+    // NOTE: may enhance or degrade performance. There are currently no clear
+    // evaluation results supporting whether it should be enabled, so it is
+    // not enabled for the time being.
 
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(crate::config::get_config().threads)
+        .build()
+        .unwrap();
+
+    let results = pool.install(|| {
+        ixz_list
+            .par_iter()
+            .map(|&ixz| {
+                let start = enable_cost_stat().then_some(Instant::now());
+                let result = process_func(ixz);
+                let cost = start.map(|s| s.elapsed());
+                (ixz, result, cost)
+            })
+            .collect::<Vec<_>>()
+    });
+
+    results
+}
+
+fn log_cost_statistics<R>(result: &[(IXZ, R, Option<Duration>)]) {
+    let len = result.len();
+    let mut sorted_costs = result
+        .iter()
+        .map(|(ixz, _, duration)| (ixz, duration))
+        .collect::<Vec<_>>();
+    sorted_costs.sort_by(|(_, a), (_, b)| a.cmp(b));
+
+    let total_cost = sorted_costs.iter().map(|e| e.1.unwrap()).sum::<Duration>();
+    log::debug!(
+        "time costs stat:\n- total {:?}\n- avg   {:?}\n- p100  {:?}\n- p99   {:?}\n- p95   {:?}\n- p50   {:?}",
+        total_cost,
+        total_cost / len as u32,
+        sorted_costs[0].0,
+        sorted_costs.get(len / 100).map(|c| c.0).unwrap(),
+        sorted_costs.get(len / 20).map(|c| c.0).unwrap(),
+        sorted_costs.get(len / 2).map(|c| c.0).unwrap(),
+    );
+
+    log::debug!(
+        "time costs top 8:\n{}",
+        sorted_costs[0..8]
+            .iter()
+            .map(|((i, x, z), d)| format!("- chunk {} ({}, {}) (cost {:?})", i, x, z, d.unwrap()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+fn enable_cost_stat() -> bool {
+    log_enabled!(Level::Debug)
+}
+
+impl Diff<Vec<u8>> for MCADiff {
+    fn from_compare(old: &Vec<u8>, new: &Vec<u8>) -> Self {
+        log::trace!("from_compare()...");
         let reader_old = Arc::new(MCAReader::from_bytes(old).unwrap());
         let reader_new = Arc::new(MCAReader::from_bytes(new).unwrap());
-        let enable_cost_stat = log_enabled!(Level::Debug);
 
-        let mut chunks = vec![ChunkWithTimestampDiff::BothNotExist; 1024];
-        let ixz_list = create_chunk_ixz_iter().collect::<Vec<_>>(); // shuffle may helpful or helpless
-
-        let pool = ThreadPoolBuilder::new()
-            .num_threads(crate::config::get_config().threads)
-            .build()
-            .unwrap();
-
-        let process_chunk = |(i, x, z): &(usize, usize, usize)| {
-            log::trace!("compare chunk i: {}", i);
-            let timing_start = if enable_cost_stat {
-                Some(Instant::now())
-            } else {
-                None
-            };
-
-            let old_ts = reader_old.get_timestamp(*x, *z);
-            let new_ts = reader_new.get_timestamp(*x, *z);
+        let results = parallel_process(|(_, x, z)| {
+            let old_ts = reader_old.get_timestamp(x, z);
+            let new_ts = reader_new.get_timestamp(x, z);
             let ts_diff = new_ts as i32 - old_ts as i32;
 
             let chunk = match (old_ts, new_ts, ts_diff) {
                 (0, 0, _) => ChunkWithTimestampDiff::BothNotExist,
                 (_, _, 0) => ChunkWithTimestampDiff::NoChange,
                 _ => {
-                    let old = reader_old.get_chunk_lazily(*x, *z);
-                    let new = reader_new.get_chunk_lazily(*x, *z);
+                    let old = reader_old.get_chunk_lazily(x, z);
+                    let new = reader_new.get_chunk_lazily(x, z);
                     match (old, new) {
                         (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
                         (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
@@ -85,14 +128,14 @@ impl Diff<Vec<u8>> for MCADiff {
                         }
                         (LazyChunk::NotExists, LazyChunk::Some(chunk)) => {
                             ChunkWithTimestampDiff::Create(
-                                chunk.timestamp as i32 - 0,
-                                BlobDiff::from_compare(&Vec::with_capacity(0), &chunk.nbt),
+                                chunk.timestamp as i32,
+                                BlobDiff::from_compare(&Vec::new(), &chunk.nbt),
                             )
                         }
                         (LazyChunk::Some(chunk), LazyChunk::NotExists) => {
                             ChunkWithTimestampDiff::Delete(
-                                0 - chunk.timestamp as i32,
-                                BlobDiff::from_compare(&chunk.nbt, &Vec::with_capacity(0)),
+                                -(chunk.timestamp as i32),
+                                BlobDiff::from_compare(&chunk.nbt, &Vec::new()),
                             )
                         }
                         (LazyChunk::Some(chunk_old), LazyChunk::Some(chunk_new)) => {
@@ -112,86 +155,45 @@ impl Diff<Vec<u8>> for MCADiff {
                     }
                 }
             };
-
-            let cost = timing_start.map(|s| s.elapsed());
-            (*i, chunk, cost, *x, *z)
-        };
-
-        let mut results: Vec<_> = vec![];
-        pool.install(|| {
-            results = ixz_list.par_iter().map(process_chunk).collect();
+            chunk
         });
 
-        let mut chunk_costs = if enable_cost_stat {
-            results
-                .iter()
-                .filter_map(|&(i, _, cost, x, z)| cost.map(|c| (c, i, x, z)))
-                .collect()
-        } else {
-            Vec::new()
-        };
-
-        for (i, chunk, _, _, _) in results {
-            chunks[i] = chunk;
+        if enable_cost_stat() {
+            log_cost_statistics(&results);
         }
 
-        if enable_cost_stat {
-            chunk_costs.sort_by(|a, b| b.0.cmp(&a.0));
-            let total_cost = chunk_costs.iter().map(|(d, _, _, _)| *d).sum::<Duration>();
-            log::debug!(
-                "chunk time costs stat:\n- total {:?}\n- avg   {:?}\n- p100  {:?}\n- p99   {:?}\n- p95   {:?}\n- p50   {:?}",
-                total_cost,
-                total_cost / 1024,
-                chunk_costs[0].0,
-                chunk_costs[10].0,
-                chunk_costs[51].0,
-                chunk_costs[512].0,
-            );
-            log::debug!(
-                "chunk time costs top 8:\n{}",
-                chunk_costs[0..8]
-                    .iter()
-                    .map(|(d, i, x, z)| format!("- chunk {} ({}, {}) (cost {:?})", i, x, z, d))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            );
+        let mut chunks = vec![ChunkWithTimestampDiff::BothNotExist; 1024];
+        for ((i, _, _), chunk, _) in results {
+            chunks[i] = chunk;
         }
 
         Self { chunks }
     }
 
-    fn from_squash(base: &Self, squashing: &Self) -> Self
-    where
-        Self: Sized,
-    {
-        let mut squashed_chunks = vec![const { ChunkWithTimestampDiff::BothNotExist }; 1024];
-        for (i, _, _) in create_chunk_ixz_iter() {
-            let chunk_diff_base = &base.chunks[i];
-            let chunk_diff_squashing = &squashing.chunks[i];
-            squashed_chunks[i] = match (chunk_diff_base, chunk_diff_squashing) {
-                // BothNotExist and BothNotExist
+    fn from_squash(base: &Self, squashing: &Self) -> Self {
+        log::trace!("from_squash()...");
+
+        let results = parallel_process(|(i, _, _)| {
+            let base_diff = &base.chunks[i];
+            let squashing_diff = &squashing.chunks[i];
+
+            let squashed = match (base_diff, squashing_diff) {
                 (ChunkWithTimestampDiff::BothNotExist, ChunkWithTimestampDiff::BothNotExist) => {
                     ChunkWithTimestampDiff::BothNotExist
                 }
-
-                // Create then Delete
                 (ChunkWithTimestampDiff::Create(_, _), ChunkWithTimestampDiff::Delete(_, _)) => {
                     ChunkWithTimestampDiff::BothNotExist
                 }
-
-                // Delete then Create
                 (
-                    ChunkWithTimestampDiff::Delete(base_ts_diff, base_chunk_diff),
-                    ChunkWithTimestampDiff::Create(squashing_ts_diff, squashing_chunk_diff),
+                    ChunkWithTimestampDiff::Delete(base_ts, base_diff),
+                    ChunkWithTimestampDiff::Create(squashing_ts, squashing_diff),
                 ) => ChunkWithTimestampDiff::Update(
-                    *base_ts_diff + *squashing_ts_diff,
+                    base_ts + squashing_ts,
                     ChunkDiff::from_compare(
-                        &de(base_chunk_diff.get_old_text()),
-                        &de(squashing_chunk_diff.get_new_text()),
+                        &de(base_diff.get_old_text()),
+                        &de(squashing_diff.get_new_text()),
                     ),
                 ),
-
-                // BothNotExist then Create or Delete then BothNotExist
                 (
                     ChunkWithTimestampDiff::BothNotExist,
                     ChunkWithTimestampDiff::Create(ts_diff, blob_diff),
@@ -200,45 +202,33 @@ impl Diff<Vec<u8>> for MCADiff {
                     ChunkWithTimestampDiff::Delete(ts_diff, blob_diff),
                     ChunkWithTimestampDiff::BothNotExist,
                 ) => ChunkWithTimestampDiff::Delete(*ts_diff, blob_diff.clone()),
-
-                // Update then Update
                 (
-                    ChunkWithTimestampDiff::Update(base_ts_diff, base_chunk_diff),
-                    ChunkWithTimestampDiff::Update(squashing_ts_diff, squashing_chunk_diff),
+                    ChunkWithTimestampDiff::Update(base_ts, base_diff),
+                    ChunkWithTimestampDiff::Update(squashing_ts, squashing_diff),
                 ) => ChunkWithTimestampDiff::Update(
-                    *base_ts_diff + *squashing_ts_diff,
-                    ChunkDiff::from_squash(base_chunk_diff, squashing_chunk_diff),
+                    base_ts + squashing_ts,
+                    ChunkDiff::from_squash(base_diff, squashing_diff),
                 ),
-
-                // Create then Update or Update then Delete
                 (
-                    ChunkWithTimestampDiff::Create(base_ts_diff, base_chunk_diff),
-                    ChunkWithTimestampDiff::Update(squashing_ts_diff, squashing_chunk_diff),
+                    ChunkWithTimestampDiff::Create(base_ts, base_diff),
+                    ChunkWithTimestampDiff::Update(squashing_ts, squashing_diff),
                 ) => ChunkWithTimestampDiff::Create(
-                    *base_ts_diff + *squashing_ts_diff,
+                    base_ts + squashing_ts,
                     BlobDiff::from_compare(
-                        base_chunk_diff.get_old_text(),
-                        &ser(&squashing_chunk_diff.patch(&de(base_chunk_diff.get_new_text()))),
+                        base_diff.get_old_text(),
+                        &ser(&squashing_diff.patch(&de(base_diff.get_new_text()))),
                     ),
                 ),
                 (
-                    ChunkWithTimestampDiff::Update(base_ts_diff, base_chunk_diff),
-                    ChunkWithTimestampDiff::Delete(squashing_ts_diff, squashing_chunk_diff),
+                    ChunkWithTimestampDiff::Update(base_ts, base_diff),
+                    ChunkWithTimestampDiff::Delete(squashing_ts, squashing_diff),
                 ) => ChunkWithTimestampDiff::Delete(
-                    *base_ts_diff + *squashing_ts_diff,
+                    base_ts + squashing_ts,
                     BlobDiff::from_compare(
-                        &ser(&base_chunk_diff.revert(&de(squashing_chunk_diff.get_old_text()))),
-                        squashing_chunk_diff.get_new_text(),
+                        &ser(&base_diff.revert(&de(squashing_diff.get_old_text()))),
+                        squashing_diff.get_new_text(),
                     ),
                 ),
-
-                // NoChange with NoChange, Create, Delete, Update
-                // (ChunkWithTimestampDiff::BothNotExist, ChunkWithTimestampDiff::NoChange)
-                // | (ChunkWithTimestampDiff::Delete(_, _), ChunkWithTimestampDiff::NoChange)
-                // | (ChunkWithTimestampDiff::NoChange, ChunkWithTimestampDiff::Create(_, _))
-                // | (ChunkWithTimestampDiff::NoChange, ChunkWithTimestampDiff::BothNotExist) => {
-                //     panic!("one diff is no change while another is a impossible diff",)
-                // }
                 (ChunkWithTimestampDiff::NoChange, ChunkWithTimestampDiff::NoChange) => {
                     ChunkWithTimestampDiff::NoChange
                 }
@@ -258,34 +248,40 @@ impl Diff<Vec<u8>> for MCADiff {
                     ChunkWithTimestampDiff::Update(ts_diff, chunk_diff),
                     ChunkWithTimestampDiff::NoChange,
                 ) => ChunkWithTimestampDiff::Update(*ts_diff, chunk_diff.clone()),
-
-                // else: panics
-                (base_diff, squashing_diff) => {
-                    panic!(
-                        "base diff {}, while squashing diff {}, which is impossible",
-                        base_diff.get_description(),
-                        squashing_diff.get_description()
-                    )
-                }
+                (base, squashing) => panic!(
+                    "Impossible diff combination: base={}, squashing={}",
+                    base.get_description(),
+                    squashing.get_description()
+                ),
             };
+            squashed
+        });
+
+        if enable_cost_stat() {
+            log_cost_statistics(&results);
         }
+
+        let mut squashed_chunks = vec![ChunkWithTimestampDiff::BothNotExist; 1024];
+        for ((i, _, _), chunk, _) in results {
+            squashed_chunks[i] = chunk;
+        }
+
         Self {
             chunks: squashed_chunks,
         }
     }
 
     fn patch(&self, old: &Vec<u8>) -> Vec<u8> {
-        let reader = MCAReader::from_bytes(old).unwrap();
-        let mut builder = MCABuilder::new();
-        let mut chunks_holder = Vec::with_capacity(1024);
-        for (i, x, z) in create_chunk_ixz_iter() {
-            let old_chunk = reader.get_chunk_lazily(x, z);
-            let chunk_diff = &self.chunks[i];
-            let new_chunk = match (old_chunk, chunk_diff) {
-                // LazyChunk::Unloaded is invalid
-                (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
+        log::trace!("patch()...");
+        let reader = Arc::new(MCAReader::from_bytes(old).unwrap());
+        let enable_cost_stat = log_enabled!(Level::Debug);
 
-                // LazyChunk::NotExists accepts ChunkWithTimestampDiff::{BothNotExist, Create}
+        let results = parallel_process(|(_, x, z)| {
+            let old_chunk = reader.get_chunk_lazily(x, z);
+            let chunk_diff = &self.chunks[z * 32 + x];
+
+            let new_chunk = match (old_chunk, chunk_diff) {
+                (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
                 (LazyChunk::NotExists, ChunkWithTimestampDiff::BothNotExist) => None,
                 (
                     LazyChunk::NotExists,
@@ -294,15 +290,13 @@ impl Diff<Vec<u8>> for MCADiff {
                     assert!(*timestamp_diff != 0);
                     Some(ChunkWithTimestamp {
                         timestamp: *timestamp_diff as u32,
-                        nbt: chunk_diff.patch(&Vec::with_capacity(0)),
+                        nbt: chunk_diff.patch(&Vec::new()),
                     })
                 }
                 (LazyChunk::NotExists, diff) => panic!(
-                    "old chunk not exists, while chunk diff {}, which is impossible",
+                    "Invalid diff for non-existing chunk: {}",
                     diff.get_description()
                 ),
-
-                // LazyChunk::Some accepts ChunkWithTimestampDiff::{Delete, Update}
                 (LazyChunk::Some(_), ChunkWithTimestampDiff::Delete(_, _)) => None,
                 (
                     LazyChunk::Some(old_chunk),
@@ -311,50 +305,54 @@ impl Diff<Vec<u8>> for MCADiff {
                     timestamp: old_chunk
                         .timestamp
                         .checked_add_signed(*timestamp_diff)
-                        .expect("timestamp overflowed"),
+                        .expect("timestamp overflow"),
                     nbt: ser(&chunk_diff.patch(&de(&old_chunk.nbt))),
                 }),
                 (LazyChunk::Some(_), diff) => panic!(
-                    "old chunk exists, while chunk diff {}, which is impossible",
+                    "Invalid diff for existing chunk: {}",
                     diff.get_description()
                 ),
             };
+            new_chunk
+        });
+
+        if enable_cost_stat {
+            log_cost_statistics(&results);
+        }
+
+        let mut builder = MCABuilder::new();
+        for ((_, x, z), new_chunk, _) in &results {
             if let Some(chunk) = new_chunk {
-                chunks_holder.push((x, z, chunk));
+                builder.set_chunk(*x, *z, &chunk);
             }
         }
-        for (x, z, chunk) in chunks_holder.iter() {
-            builder.set_chunk(*x, *z, &chunk);
-        }
+
         builder.to_bytes(CompressionType::Zlib)
     }
 
     fn revert(&self, new: &Vec<u8>) -> Vec<u8> {
-        let reader = MCAReader::from_bytes(new).unwrap();
-        let mut builder = MCABuilder::new();
-        let mut chunks_holder = Vec::with_capacity(1024);
-        for (i, x, z) in create_chunk_ixz_iter() {
-            let new_chunk = reader.get_chunk_lazily(x, z);
-            let chunk_diff = &self.chunks[i];
-            let old_chunk = match (chunk_diff, new_chunk) {
-                // LazyChunk::Unloaded
-                (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
+        log::trace!("revert()...");
+        let reader = Arc::new(MCAReader::from_bytes(new).unwrap());
+        let enable_cost_stat = log_enabled!(Level::Debug);
 
-                // ChunkWithTimestampDiff::{Delete, BothNotExist} accept LazyChunk::NotExists
+        let results = parallel_process(|(_, x, z)| {
+            let new_chunk = reader.get_chunk_lazily(x, z);
+            let chunk_diff = &self.chunks[z * 32 + x];
+
+            let old_chunk = match (chunk_diff, new_chunk) {
+                (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
                 (ChunkWithTimestampDiff::BothNotExist, LazyChunk::NotExists) => None,
                 (
                     ChunkWithTimestampDiff::Delete(timestamp_diff, chunk_diff),
                     LazyChunk::NotExists,
                 ) => Some(ChunkWithTimestamp {
                     timestamp: (-*timestamp_diff) as u32,
-                    nbt: chunk_diff.revert(&Vec::with_capacity(0)),
+                    nbt: chunk_diff.revert(&Vec::new()),
                 }),
                 (diff, LazyChunk::NotExists) => panic!(
-                    "diff {}, while new chunk not exists, which is impossible",
+                    "Invalid diff for non-existing chunk: {}",
                     diff.get_description()
                 ),
-
-                // ChunkWithTimestampDiff::{Create, Update} accepts LazyChunk::Some
                 (ChunkWithTimestampDiff::Create(_, _), LazyChunk::Some(_)) => None,
                 (
                     ChunkWithTimestampDiff::Update(timestamp_diff, chunk_diff),
@@ -363,24 +361,32 @@ impl Diff<Vec<u8>> for MCADiff {
                     timestamp: new_chunk
                         .timestamp
                         .checked_add_signed(-*timestamp_diff)
-                        .expect("timestamp overflowed"),
+                        .expect("timestamp overflow"),
                     nbt: ser(&chunk_diff.revert(&de(&new_chunk.nbt))),
                 }),
                 (diff, LazyChunk::Some(_)) => panic!(
-                    "diff {}, while new chunk exists, which is impossible",
+                    "Invalid diff for existing chunk: {}",
                     diff.get_description()
                 ),
             };
+            old_chunk
+        });
+
+        if enable_cost_stat {
+            log_cost_statistics(&results);
+        }
+
+        let mut builder = MCABuilder::new();
+        for ((_, x, z), old_chunk, _) in &results {
             if let Some(chunk) = old_chunk {
-                chunks_holder.push((x, z, chunk));
+                builder.set_chunk(*x, *z, &chunk);
             }
         }
-        for (x, z, chunk) in chunks_holder.iter() {
-            builder.set_chunk(*x, *z, &chunk);
-        }
+
         builder.to_bytes(CompressionType::Zlib)
     }
 }
+
 #[cfg(test)]
 mod tests {
     use rand::prelude::*;

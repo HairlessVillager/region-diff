@@ -1,4 +1,5 @@
-pub fn create_chunk_ixz_iter() -> impl Iterator<Item = (usize, usize, usize)> {
+pub type IXZ = (usize, usize, usize);
+pub fn create_chunk_ixz_iter() -> impl Iterator<Item = IXZ> {
     (0..32).flat_map(|z| {
         (0..32).map(move |x| {
             let i = x + 32 * z;
