@@ -24,10 +24,11 @@ fn write_trace_log_file(writer: &Mutex<LineWriter<File>>, record: &Record) {
     let mut writer = writer.lock().unwrap();
     writeln!(
         writer,
-        "[{:<5} {} {}] {}",
+        "[{:<5} {} {} {:?}] {}",
         map_level_to_str(record.level()),
         now().format("%H:%M:%S%.6f").to_string(),
         record.module_path().unwrap_or("???"),
+        std::thread::current().id(),
         record.args()
     )
     .unwrap();

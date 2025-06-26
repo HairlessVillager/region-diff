@@ -36,7 +36,6 @@ pub mod serde {
     }
 }
 
-#[cfg(test)]
 pub mod test {
     use std::{fs, path::PathBuf};
 
@@ -74,16 +73,6 @@ pub mod test {
             } else {
                 None
             }
-        })
-    }
-    #[allow(dead_code)]
-    pub fn file_iter(file_type: FileType, name: String) -> impl Iterator<Item = PathBuf> {
-        let mut path = file_type_to_path(file_type);
-        path.push(PathBuf::from(name));
-        fs::read_dir(path).unwrap().filter_map(|entry| {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_file() { Some(path) } else { None }
         })
     }
     pub fn rearranged_nbt(bytes: &Vec<u8>) -> Result<Vec<u8>, fastnbt::error::Error> {

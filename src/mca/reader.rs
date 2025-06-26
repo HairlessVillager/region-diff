@@ -1,11 +1,10 @@
+use std::io::{Cursor, Read, Seek};
+use std::path::PathBuf;
+
 use crate::compress::CompressionType;
 
 use super::SECTOR_SIZE;
-
 use super::{ChunkWithTimestamp, HeaderEntry};
-use std::io::{Cursor, Read, Seek};
-#[cfg(test)]
-use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum LazyChunk {
@@ -58,8 +57,7 @@ impl<R: Read + Seek> MCAReader<R> {
             chunks,
         })
     }
-
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn get_chunk(
         &mut self,
         x: usize,
@@ -113,7 +111,6 @@ impl<R: Read + Seek> MCAReader<R> {
     }
 }
 
-#[cfg(test)]
 impl MCAReader<std::io::BufReader<std::fs::File>> {
     pub fn from_file(path: &PathBuf, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
         use std::{fs::File, io::BufReader};

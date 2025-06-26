@@ -14,7 +14,6 @@ impl Diff<Value> for ChunkDiff {
     where
         Self: Sized,
     {
-        log::trace!("from_compare()...");
         let mut old = match old {
             Value::Compound(x) => x.clone(),
             _ => panic!("invalid old nbt"),
@@ -24,22 +23,16 @@ impl Diff<Value> for ChunkDiff {
             _ => panic!("invalid new nbt"),
         };
 
-        log::trace!("calc diff_block_entities...");
         let diff_block_entities;
         {
-            log::trace!("pop_block_entities_from for old...");
             let old_block_entities = old.remove("block_entities").unwrap();
-            log::trace!("pop_block_entities_from for new...");
             let new_block_entities = new.remove("block_entities").unwrap();
-            log::trace!("MyersDiff::from_compare...");
             diff_block_entities =
                 BlockEntitiesDiff::from_compare(&old_block_entities, &new_block_entities);
         }
 
-        log::trace!("calc diff_sections...");
         let diff_sections;
         {
-            log::trace!("get old/new sections...");
             let old_sections = old.remove("sections").unwrap();
             let old_sections = match old_sections {
                 Value::List(x) => x,
@@ -52,7 +45,6 @@ impl Diff<Value> for ChunkDiff {
             };
             assert_eq!(old_sections.len(), new_sections.len());
 
-            log::trace!("calc diff_sections by old/new sections...");
             let mut mut_diff_sections = Vec::with_capacity(old_sections.len());
             for (old, new) in old_sections.iter().zip(new_sections.iter()) {
                 let old = fastnbt::to_bytes(old).unwrap();
@@ -63,7 +55,6 @@ impl Diff<Value> for ChunkDiff {
             diff_sections = mut_diff_sections;
         }
 
-        log::trace!("calc diff_others...");
         let diff_others;
         {
             let old_others = fastnbt::to_bytes(&Value::Compound(old.clone())).unwrap();
@@ -71,7 +62,6 @@ impl Diff<Value> for ChunkDiff {
             diff_others = MyersDiff::from_compare(&old_others, &new_others);
         }
 
-        log::trace!("from_compare()...done");
         Self {
             block_entities: diff_block_entities,
             sections: diff_sections,
@@ -269,9 +259,13 @@ mod tests {
             let mut rng_old = StdRng::seed_from_u64(114514);
             let mut rng_new = rng_old.clone();
             rng_new.next_u32();
-            let binding = PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca");
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250511.mca",
+            );
             let mut old_iter = get_test_chunk(&binding, &mut rng_old);
-            let binding = PathBuf::from("./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca");
+            let binding = PathBuf::from(
+                "./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca",
+            );
             let mut new_iter = get_test_chunk(&binding, &mut rng_new);
             for _ in 0..10 {
                 let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();

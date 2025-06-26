@@ -44,30 +44,60 @@ where
     F: Fn(IXZ) -> R + Sync + Send,
     R: Send,
 {
-    let ixz_list = create_chunk_ixz_iter().collect::<Vec<_>>();
-    // ixz_list.shuffle(...);
-    // NOTE: may enhance or degrade performance. There are currently no clear
-    // evaluation results supporting whether it should be enabled, so it is
-    // not enabled for the time being.
-
     let pool = ThreadPoolBuilder::new()
         .num_threads(crate::config::get_config().threads)
         .build()
         .unwrap();
 
-    let results = pool.install(|| {
-        ixz_list
-            .par_iter()
-            .map(|&ixz| {
-                let start = enable_cost_stat().then_some(Instant::now());
-                let result = process_func(ixz);
-                let cost = start.map(|s| s.elapsed());
-                (ixz, result, cost)
+    pool.install(|| {
+        create_chunk_ixz_iter()
+            .par_bridge()
+            .map(|ixz| {
+                log::trace!("process ixz: {ixz:?}...");
+                let start = Instant::now();
+                let res = process_func(ixz);
+                let duration = start.elapsed();
+                log::trace!("process ixz: {ixz:?}...done");
+                (ixz, res, Some(duration))
             })
-            .collect::<Vec<_>>()
-    });
+            .collect()
+    })
+}
 
-    results
+fn parallel_process_with_cost_estimator<F, E, R>(
+    process_func: F,
+    cost_estimator: E,
+) -> Vec<(IXZ, R, Option<Duration>)>
+where
+    F: Fn(IXZ) -> R + Sync + Send,
+    E: Fn(&IXZ) -> usize + Sync + Send,
+    R: Send,
+{
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(crate::config::get_config().threads)
+        .build()
+        .unwrap();
+
+    log::trace!("sorting tasks for load balance...");
+    let mut tasks = create_chunk_ixz_iter().collect::<Vec<_>>();
+    tasks.sort_by_cached_key(|ixz| std::cmp::Reverse(cost_estimator(ixz)));
+    log::trace!("sorting tasks for load balance...done");
+    log::trace!("first 10 items: {:?}", &tasks[..10]);
+
+    pool.install(|| {
+        tasks
+            .into_iter()
+            .par_bridge()
+            .map(|ixz| {
+                log::trace!("process ixz: {ixz:?}...");
+                let start = Instant::now();
+                let res = process_func(ixz);
+                let duration = start.elapsed();
+                log::trace!("process ixz: {ixz:?}...done");
+                (ixz, res, Some(duration))
+            })
+            .collect()
+    })
 }
 
 fn log_cost_statistics<R>(result: &[(IXZ, R, Option<Duration>)]) {
@@ -76,17 +106,17 @@ fn log_cost_statistics<R>(result: &[(IXZ, R, Option<Duration>)]) {
         .iter()
         .map(|(ixz, _, duration)| (ixz, duration))
         .collect::<Vec<_>>();
-    sorted_costs.sort_by(|(_, a), (_, b)| a.cmp(b));
+    sorted_costs.sort_by(|(_, a), (_, b)| b.cmp(a));
 
     let total_cost = sorted_costs.iter().map(|e| e.1.unwrap()).sum::<Duration>();
     log::debug!(
         "time costs stat:\n- total {:?}\n- avg   {:?}\n- p100  {:?}\n- p99   {:?}\n- p95   {:?}\n- p50   {:?}",
         total_cost,
         total_cost / len as u32,
-        sorted_costs[0].0,
-        sorted_costs.get(len / 100).map(|c| c.0).unwrap(),
-        sorted_costs.get(len / 20).map(|c| c.0).unwrap(),
-        sorted_costs.get(len / 2).map(|c| c.0).unwrap(),
+        sorted_costs[0].1.unwrap(),
+        sorted_costs[len / 100].1.unwrap(),
+        sorted_costs[len / 20].1.unwrap(),
+        sorted_costs[len / 2].1.unwrap(),
     );
 
     log::debug!(
@@ -105,58 +135,84 @@ fn enable_cost_stat() -> bool {
 
 impl Diff<Vec<u8>> for MCADiff {
     fn from_compare(old: &Vec<u8>, new: &Vec<u8>) -> Self {
-        log::trace!("from_compare()...");
         let reader_old = Arc::new(MCAReader::from_bytes(old).unwrap());
         let reader_new = Arc::new(MCAReader::from_bytes(new).unwrap());
 
-        let results = parallel_process(|(_, x, z)| {
-            let old_ts = reader_old.get_timestamp(x, z);
-            let new_ts = reader_new.get_timestamp(x, z);
-            let ts_diff = new_ts as i32 - old_ts as i32;
+        let results = parallel_process_with_cost_estimator(
+            |(_, x, z)| {
+                let old_ts = reader_old.get_timestamp(x, z);
+                let new_ts = reader_new.get_timestamp(x, z);
+                let ts_diff = new_ts as i32 - old_ts as i32;
 
-            let chunk = match (old_ts, new_ts, ts_diff) {
-                (0, 0, _) => ChunkWithTimestampDiff::BothNotExist,
-                (_, _, 0) => ChunkWithTimestampDiff::NoChange,
-                _ => {
-                    let old = reader_old.get_chunk_lazily(x, z);
-                    let new = reader_new.get_chunk_lazily(x, z);
-                    match (old, new) {
-                        (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
-                        (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
-                        (LazyChunk::NotExists, LazyChunk::NotExists) => {
-                            ChunkWithTimestampDiff::BothNotExist
-                        }
-                        (LazyChunk::NotExists, LazyChunk::Some(chunk)) => {
-                            ChunkWithTimestampDiff::Create(
-                                chunk.timestamp as i32,
-                                BlobDiff::from_compare(&Vec::new(), &chunk.nbt),
-                            )
-                        }
-                        (LazyChunk::Some(chunk), LazyChunk::NotExists) => {
-                            ChunkWithTimestampDiff::Delete(
-                                -(chunk.timestamp as i32),
-                                BlobDiff::from_compare(&chunk.nbt, &Vec::new()),
-                            )
-                        }
-                        (LazyChunk::Some(chunk_old), LazyChunk::Some(chunk_new)) => {
-                            let ts_diff = chunk_new.timestamp as i32 - chunk_old.timestamp as i32;
-                            if ts_diff == 0 {
-                                ChunkWithTimestampDiff::NoChange
-                            } else {
-                                ChunkWithTimestampDiff::Update(
-                                    ts_diff,
-                                    ChunkDiff::from_compare(
-                                        &de(&chunk_old.nbt),
-                                        &de(&chunk_new.nbt),
-                                    ),
+                let chunk = match (old_ts, new_ts, ts_diff) {
+                    (0, 0, _) => ChunkWithTimestampDiff::BothNotExist,
+                    (_, _, 0) => ChunkWithTimestampDiff::NoChange,
+                    _ => {
+                        let old = reader_old.get_chunk_lazily(x, z);
+                        let new = reader_new.get_chunk_lazily(x, z);
+                        match (old, new) {
+                            (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
+                            (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
+                            (LazyChunk::NotExists, LazyChunk::NotExists) => {
+                                ChunkWithTimestampDiff::BothNotExist
+                            }
+                            (LazyChunk::NotExists, LazyChunk::Some(chunk)) => {
+                                ChunkWithTimestampDiff::Create(
+                                    chunk.timestamp as i32,
+                                    BlobDiff::from_compare(&Vec::new(), &chunk.nbt),
                                 )
+                            }
+                            (LazyChunk::Some(chunk), LazyChunk::NotExists) => {
+                                ChunkWithTimestampDiff::Delete(
+                                    -(chunk.timestamp as i32),
+                                    BlobDiff::from_compare(&chunk.nbt, &Vec::new()),
+                                )
+                            }
+                            (LazyChunk::Some(chunk_old), LazyChunk::Some(chunk_new)) => {
+                                let ts_diff =
+                                    chunk_new.timestamp as i32 - chunk_old.timestamp as i32;
+                                if ts_diff == 0 {
+                                    ChunkWithTimestampDiff::NoChange
+                                } else {
+                                    ChunkWithTimestampDiff::Update(
+                                        ts_diff,
+                                        ChunkDiff::from_compare(
+                                            &de(&chunk_old.nbt),
+                                            &de(&chunk_new.nbt),
+                                        ),
+                                    )
+                                }
                             }
                         }
                     }
-                }
-            };
-            chunk
-        });
+                };
+                chunk
+            },
+            |(_, x, z)| {
+                let old_ts = reader_old.get_timestamp(*x, *z);
+                let new_ts = reader_new.get_timestamp(*x, *z);
+                let ts_diff = new_ts as i32 - old_ts as i32;
+
+                let chunk = match (old_ts, new_ts, ts_diff) {
+                    (0, 0, _) => 0,
+                    (_, _, 0) => 0,
+                    _ => {
+                        let old = reader_old.get_chunk_lazily(*x, *z);
+                        let new = reader_new.get_chunk_lazily(*x, *z);
+                        match (old, new) {
+                            (LazyChunk::Some(chunk_old), LazyChunk::Some(chunk_new)) => {
+                                use std::cmp::{max, min};
+                                let old = chunk_old.nbt.len();
+                                let new = chunk_new.nbt.len();
+                                max(old, new) - min(old, new)
+                            }
+                            _ => 0,
+                        }
+                    }
+                };
+                chunk
+            },
+        );
 
         if enable_cost_stat() {
             log_cost_statistics(&results);
@@ -171,8 +227,6 @@ impl Diff<Vec<u8>> for MCADiff {
     }
 
     fn from_squash(base: &Self, squashing: &Self) -> Self {
-        log::trace!("from_squash()...");
-
         let results = parallel_process(|(i, _, _)| {
             let base_diff = &base.chunks[i];
             let squashing_diff = &squashing.chunks[i];
@@ -272,7 +326,6 @@ impl Diff<Vec<u8>> for MCADiff {
     }
 
     fn patch(&self, old: &Vec<u8>) -> Vec<u8> {
-        log::trace!("patch()...");
         let reader = Arc::new(MCAReader::from_bytes(old).unwrap());
         let enable_cost_stat = log_enabled!(Level::Debug);
 
@@ -308,7 +361,9 @@ impl Diff<Vec<u8>> for MCADiff {
                         .expect("timestamp overflow"),
                     nbt: ser(&chunk_diff.patch(&de(&old_chunk.nbt))),
                 }),
-                (LazyChunk::Some(old_chunk),ChunkWithTimestampDiff::NoChange)=>Some(old_chunk.clone()),
+                (LazyChunk::Some(old_chunk), ChunkWithTimestampDiff::NoChange) => {
+                    Some(old_chunk.clone())
+                }
                 (LazyChunk::Some(_), diff) => panic!(
                     "Invalid diff for existing chunk: {}",
                     diff.get_description()
@@ -332,7 +387,6 @@ impl Diff<Vec<u8>> for MCADiff {
     }
 
     fn revert(&self, new: &Vec<u8>) -> Vec<u8> {
-        log::trace!("revert()...");
         let reader = Arc::new(MCAReader::from_bytes(new).unwrap());
         let enable_cost_stat = log_enabled!(Level::Debug);
 
@@ -365,7 +419,9 @@ impl Diff<Vec<u8>> for MCADiff {
                         .expect("timestamp overflow"),
                     nbt: ser(&chunk_diff.revert(&de(&new_chunk.nbt))),
                 }),
-                (ChunkWithTimestampDiff::NoChange, LazyChunk::Some(new_chunk)) => Some(new_chunk.clone()),
+                (ChunkWithTimestampDiff::NoChange, LazyChunk::Some(new_chunk)) => {
+                    Some(new_chunk.clone())
+                }
                 (diff, LazyChunk::Some(_)) => panic!(
                     "Invalid diff for existing chunk: {}",
                     diff.get_description()
