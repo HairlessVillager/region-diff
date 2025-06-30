@@ -17,9 +17,9 @@ pub fn fastnbt_deserialize(input: &[u8]) -> fastnbt::Value {
 
 pub mod serde {
     use bincode::{
+        config::{BigEndian, Configuration}, decode_from_slice,
+        encode_to_vec,
         Decode, Encode,
-        config::{BigEndian, Configuration},
-        decode_from_slice, encode_to_vec,
     };
 
     static CONFIG: Configuration<BigEndian> = bincode::config::standard()
@@ -42,12 +42,13 @@ pub mod test {
     use fastnbt::Value;
     use rand::prelude::*;
 
-    use crate::{
-        FileType,
-        mca::{ChunkWithTimestamp, MCAReader},
-    };
-
     use super::create_chunk_ixz_iter;
+    use crate::compress::CompressionType;
+    use crate::{
+        mca::{ChunkWithTimestamp, MCAReader},
+        util,
+        FileType,
+    };
 
     fn file_type_to_path(file_type: FileType) -> PathBuf {
         let mut path = PathBuf::from("resources/test-payload");
@@ -117,6 +118,13 @@ pub mod test {
                 assert_eq!(chunk_a, chunk_b);
             }
         }
+    }
+    pub fn assert_mcc_eq(a: Vec<u8>, b: Vec<u8>) {
+        let decompressed_a = CompressionType::Zlib.decompress_all(&a).unwrap();
+        let nbt_a = util::fastnbt_deserialize(&decompressed_a);
+        let decompressed_b = CompressionType::Zlib.decompress_all(&b).unwrap();
+        let nbt_b = util::fastnbt_deserialize(&decompressed_b);
+        assert_eq!(nbt_a, nbt_b);
     }
     pub fn get_test_chunk(path: &PathBuf, rng: &mut StdRng) -> impl Iterator<Item = Vec<u8>> {
         let mut reader = MCAReader::from_file(path, false).unwrap();

@@ -45,7 +45,7 @@ impl<R: Read + Seek> MCAReader<R> {
                         LazyChunk::Some(ChunkWithTimestamp {
                             timestamp: header_entry.timestamp,
                             nbt: read_chunk_nbt(&sector_buf)
-                                .map_err(|e| format!("decompresstion error: {}", &e))?,
+                                .map_err(|e| format!("decompression error: {}", &e))?,
                         })
                     }
                 }
@@ -91,7 +91,7 @@ impl<R: Read + Seek> MCAReader<R> {
         let chunk = ChunkWithTimestamp {
             timestamp: header.timestamp,
             nbt: read_chunk_nbt(&sector_buf)
-                .map_err(|e| format!("decompresstion failed: {}", &e))?,
+                .map_err(|e| format!("decompression failed: {}", &e))?,
         };
 
         self.chunks[idx] = LazyChunk::Some(chunk);

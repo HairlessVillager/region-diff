@@ -16,8 +16,11 @@ type XYZ = (i32, i32, i32);
 enum BlockEntityDiff {
     Create(BlobDiff),
     Delete(BlobDiff),
-    UpdateSameID(MyersDiff),
-    UpdateDiffID(BlobDiff),
+    // see also https://minecraft.wiki/w/Chunk_format#Block_entity_format
+    // same BlockEntity ID , e.g: chest => chest
+    UpdateSameBlockEntityID(MyersDiff),
+    // different BlockEntity ID , e.g: chest => furnace
+    UpdateDiffBlockEntityID(BlobDiff),
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
@@ -112,12 +115,14 @@ impl Diff<Value> for BlockEntitiesDiff {
                 )),
                 (Some((old_id, old_v)), Some((new_id, new_v))) => {
                     if old_id == new_id {
-                        BlockEntityDiff::UpdateSameID(MyersDiff::from_compare(
+                        log::info!("sameID");
+                        BlockEntityDiff::UpdateSameBlockEntityID(MyersDiff::from_compare(
                             &fastnbt::to_bytes(old_v).unwrap(),
                             &fastnbt::to_bytes(new_v).unwrap(),
                         ))
                     } else {
-                        BlockEntityDiff::UpdateDiffID(BlobDiff::from_compare(
+                        log::info!("blob");
+                        BlockEntityDiff::UpdateDiffBlockEntityID(BlobDiff::from_compare(
                             &fastnbt::to_bytes(old_v).unwrap(),
                             &fastnbt::to_bytes(new_v).unwrap(),
                         ))
@@ -155,60 +160,72 @@ impl Diff<Value> for BlockEntitiesDiff {
                         // Create xor Delete
                         (BlockEntityDiff::Create(_), BlockEntityDiff::Delete(_)) => None,
                         (BlockEntityDiff::Delete(base), BlockEntityDiff::Create(squashing)) => {
-                            Some(BlockEntityDiff::UpdateDiffID(BlobDiff::from_squash(
-                                base, squashing,
-                            )))
+                            Some(BlockEntityDiff::UpdateDiffBlockEntityID(
+                                BlobDiff::from_squash(base, squashing),
+                            ))
                         }
 
                         // Create then Update
-                        (BlockEntityDiff::Create(blob), BlockEntityDiff::UpdateSameID(myers)) => {
-                            Some(BlockEntityDiff::Create(BlobDiff::from_create(
-                                &myers.patch(blob.get_new_text()),
-                            )))
-                        }
-                        (BlockEntityDiff::Create(_), BlockEntityDiff::UpdateDiffID(blob)) => Some(
-                            BlockEntityDiff::Create(BlobDiff::from_create(blob.get_new_text())),
-                        ),
+                        (
+                            BlockEntityDiff::Create(blob),
+                            BlockEntityDiff::UpdateSameBlockEntityID(myers),
+                        ) => Some(BlockEntityDiff::Create(BlobDiff::from_create(
+                            &myers.patch(blob.get_new_text()),
+                        ))),
+                        (
+                            BlockEntityDiff::Create(_),
+                            BlockEntityDiff::UpdateDiffBlockEntityID(blob),
+                        ) => Some(BlockEntityDiff::Create(BlobDiff::from_create(
+                            blob.get_new_text(),
+                        ))),
 
                         // Update then Delete
-                        (BlockEntityDiff::UpdateSameID(myers), BlockEntityDiff::Delete(blob)) => {
-                            Some(BlockEntityDiff::Delete(BlobDiff::from_delete(
-                                &myers.revert(blob.get_old_text()),
-                            )))
-                        }
-                        (BlockEntityDiff::UpdateDiffID(blob), BlockEntityDiff::Delete(_)) => Some(
-                            BlockEntityDiff::Delete(BlobDiff::from_delete(blob.get_old_text())),
-                        ),
+                        (
+                            BlockEntityDiff::UpdateSameBlockEntityID(myers),
+                            BlockEntityDiff::Delete(blob),
+                        ) => Some(BlockEntityDiff::Delete(BlobDiff::from_delete(
+                            &myers.revert(blob.get_old_text()),
+                        ))),
+                        (
+                            BlockEntityDiff::UpdateDiffBlockEntityID(blob),
+                            BlockEntityDiff::Delete(_),
+                        ) => Some(BlockEntityDiff::Delete(BlobDiff::from_delete(
+                            blob.get_old_text(),
+                        ))),
 
                         // Updates in different type
                         (
-                            BlockEntityDiff::UpdateSameID(myers),
-                            BlockEntityDiff::UpdateDiffID(blob),
-                        ) => Some(BlockEntityDiff::UpdateDiffID(BlobDiff::from_compare(
-                            &myers.revert(blob.get_old_text()),
-                            blob.get_new_text(),
-                        ))),
+                            BlockEntityDiff::UpdateSameBlockEntityID(myers),
+                            BlockEntityDiff::UpdateDiffBlockEntityID(blob),
+                        ) => Some(BlockEntityDiff::UpdateDiffBlockEntityID(
+                            BlobDiff::from_compare(
+                                &myers.revert(blob.get_old_text()),
+                                blob.get_new_text(),
+                            ),
+                        )),
                         (
-                            BlockEntityDiff::UpdateDiffID(blob),
-                            BlockEntityDiff::UpdateSameID(myers),
-                        ) => Some(BlockEntityDiff::UpdateDiffID(BlobDiff::from_compare(
-                            blob.get_old_text(),
-                            &myers.patch(blob.get_new_text()),
-                        ))),
+                            BlockEntityDiff::UpdateDiffBlockEntityID(blob),
+                            BlockEntityDiff::UpdateSameBlockEntityID(myers),
+                        ) => Some(BlockEntityDiff::UpdateDiffBlockEntityID(
+                            BlobDiff::from_compare(
+                                blob.get_old_text(),
+                                &myers.patch(blob.get_new_text()),
+                            ),
+                        )),
 
                         // Updates in same type
                         (
-                            BlockEntityDiff::UpdateSameID(base),
-                            BlockEntityDiff::UpdateSameID(squashing),
-                        ) => Some(BlockEntityDiff::UpdateSameID(MyersDiff::from_squash(
-                            base, squashing,
-                        ))),
+                            BlockEntityDiff::UpdateSameBlockEntityID(base),
+                            BlockEntityDiff::UpdateSameBlockEntityID(squashing),
+                        ) => Some(BlockEntityDiff::UpdateSameBlockEntityID(
+                            MyersDiff::from_squash(base, squashing),
+                        )),
                         (
-                            BlockEntityDiff::UpdateDiffID(base),
-                            BlockEntityDiff::UpdateDiffID(squashing),
-                        ) => Some(BlockEntityDiff::UpdateDiffID(BlobDiff::from_squash(
-                            base, squashing,
-                        ))),
+                            BlockEntityDiff::UpdateDiffBlockEntityID(base),
+                            BlockEntityDiff::UpdateDiffBlockEntityID(squashing),
+                        ) => Some(BlockEntityDiff::UpdateDiffBlockEntityID(
+                            BlobDiff::from_squash(base, squashing),
+                        )),
 
                         // panics
                         _ => {
@@ -233,10 +250,12 @@ impl Diff<Value> for BlockEntitiesDiff {
             let new_be = match (old_be, diff) {
                 (None, BlockEntityDiff::Create(diff)) => Some(de(&diff.patch0())),
                 (Some(_), BlockEntityDiff::Delete(_)) => None,
-                (Some(old), BlockEntityDiff::UpdateSameID(diff)) => {
+                (Some(old), BlockEntityDiff::UpdateSameBlockEntityID(diff)) => {
                     Some(de(&diff.patch(&ser(old))))
                 }
-                (Some(_), BlockEntityDiff::UpdateDiffID(diff)) => Some(de(&diff.patch0())),
+                (Some(_), BlockEntityDiff::UpdateDiffBlockEntityID(diff)) => {
+                    Some(de(&diff.patch0()))
+                }
                 (old_be, diff) => panic!("unmatching {:?} and {:?}", old_be, diff),
             };
             match new_be {
@@ -254,10 +273,12 @@ impl Diff<Value> for BlockEntitiesDiff {
             let old_be = match (diff, new_be) {
                 (BlockEntityDiff::Create(_), Some(_)) => None,
                 (BlockEntityDiff::Delete(diff), None) => Some(de(&diff.revert0())),
-                (BlockEntityDiff::UpdateSameID(diff), Some(new)) => {
+                (BlockEntityDiff::UpdateSameBlockEntityID(diff), Some(new)) => {
                     Some(de(&diff.revert(&ser(new))))
                 }
-                (BlockEntityDiff::UpdateDiffID(diff), Some(_)) => Some(de(&diff.revert0())),
+                (BlockEntityDiff::UpdateDiffBlockEntityID(diff), Some(_)) => {
+                    Some(de(&diff.revert0()))
+                }
                 (diff, new_be) => panic!("unmatching {:?} and {:?}", diff, new_be),
             };
             match old_be {
