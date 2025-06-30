@@ -17,6 +17,11 @@
       - seed: -1225832926051192979
       - original file name: r.0.-1.mca
       - contributors: ycc
+    - `ycc-large-chunk-mca`
+      - version: Minecraft Java Edition 1.21.4
+      - seed: -1225832926051192979
+      - original file name: r.0.0.mca
+      - contributors: ycc
   - `mcc`
     - `ycc-small-data`
       - version: Minecraft Java Edition 1.21.4

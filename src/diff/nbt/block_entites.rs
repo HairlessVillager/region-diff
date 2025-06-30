@@ -295,12 +295,23 @@ mod tests {
 
     use fastnbt::Value;
 
-    use crate::{diff::Diff, mca::ChunkWithTimestamp, util::test::get_test_chunk_by_xz};
+    use crate::{
+        diff::Diff,
+        mca::{ChunkNbt, ChunkWithTimestamp},
+        util::test::get_test_chunk_by_xz,
+    };
 
     use super::BlockEntitiesDiff;
 
     fn get_block_entities_from_chunk(chunk: ChunkWithTimestamp) -> Value {
-        let nbt = chunk.nbt;
+        let nbt = match chunk.nbt {
+            ChunkNbt::Large => panic!(concat!(
+                "This chunk is too large to save in .mca file, so it do not contains any bytes. ",
+                "If you are testing, use another .mca file instead.",
+            )),
+            ChunkNbt::Small(nbt) => nbt,
+        };
+
         match fastnbt::from_bytes(&nbt).unwrap() {
             Value::Compound(mut map) => map.remove("block_entities").unwrap(),
             _ => panic!("root is not Value::Compound"),

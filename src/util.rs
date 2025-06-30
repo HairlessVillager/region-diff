@@ -17,9 +17,9 @@ pub fn fastnbt_deserialize(input: &[u8]) -> fastnbt::Value {
 
 pub mod serde {
     use bincode::{
-        config::{BigEndian, Configuration}, decode_from_slice,
-        encode_to_vec,
         Decode, Encode,
+        config::{BigEndian, Configuration},
+        decode_from_slice, encode_to_vec,
     };
 
     static CONFIG: Configuration<BigEndian> = bincode::config::standard()
@@ -36,18 +36,93 @@ pub mod serde {
     }
 }
 
+pub mod parallel {
+    use std::{
+        fmt::Debug,
+        time::{Duration, Instant},
+    };
+
+    use rayon::{ThreadPoolBuilder, prelude::*};
+
+    pub fn parallel_process<I, O, G, F>(
+        task_generator: G,
+        process_func: F,
+    ) -> Vec<(I, O, Option<Duration>)>
+    where
+        I: Send + Debug,
+        O: Send,
+        G: Iterator<Item = I> + ParallelBridge + Send,
+        F: Fn(&I) -> O + Sync + Send,
+    {
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(crate::config::get_config().threads)
+            .build()
+            .unwrap();
+
+        pool.install(|| {
+            task_generator
+                .par_bridge()
+                .map(|input| {
+                    log::trace!("process task: {:?}...", &input);
+                    let start = Instant::now();
+                    let output = process_func(&input);
+                    let duration = start.elapsed();
+                    log::trace!("process task: {:?}...done", &input);
+                    (input, output, Some(duration))
+                })
+                .collect()
+        })
+    }
+    pub fn parallel_process_with_cost_estimator<I, O, G, F, E>(
+        task_generator: G,
+        process_func: F,
+        cost_estimator: E,
+    ) -> Vec<(I, O, Option<Duration>)>
+    where
+        I: Send + Debug,
+        O: Send,
+        G: Iterator<Item = I> + ParallelBridge + Send,
+        F: Fn(&I) -> O + Sync + Send,
+        E: Fn(&I) -> usize + Sync + Send,
+    {
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(crate::config::get_config().threads)
+            .build()
+            .unwrap();
+
+        log::trace!("sorting tasks for load balance...");
+        let mut tasks = task_generator.collect::<Vec<_>>();
+        tasks.sort_by_cached_key(|ixz| std::cmp::Reverse(cost_estimator(ixz)));
+        log::trace!("sorting tasks for load balance...done");
+        log::trace!("first 10 items: {:?}", &tasks[..10]);
+
+        pool.install(|| {
+            tasks
+                .into_iter()
+                .par_bridge()
+                .map(|input| {
+                    log::trace!("process task: {:?}...", &input);
+                    let start = Instant::now();
+                    let output = process_func(&input);
+                    let duration = start.elapsed();
+                    log::trace!("process task: {:?}...done", &input);
+                    (input, output, Some(duration))
+                })
+                .collect()
+        })
+    }
+}
 pub mod test {
     use std::{fs, path::PathBuf};
 
-    use fastnbt::Value;
     use rand::prelude::*;
 
     use super::create_chunk_ixz_iter;
     use crate::compress::CompressionType;
     use crate::{
-        mca::{ChunkWithTimestamp, MCAReader},
-        util,
         FileType,
+        mca::{ChunkNbt, ChunkWithTimestamp, MCAReader},
+        util,
     };
 
     fn file_type_to_path(file_type: FileType) -> PathBuf {
@@ -110,10 +185,7 @@ pub mod test {
                     nbt: nbt_b,
                 } = chunk_b.unwrap();
                 assert_eq!(ts_a, ts_b);
-                assert_eq!(
-                    fastnbt::from_bytes::<Value>(nbt_a),
-                    fastnbt::from_bytes::<Value>(nbt_b)
-                );
+                assert_eq!(nbt_a, nbt_b);
             } else {
                 assert_eq!(chunk_a, chunk_b);
             }
@@ -133,8 +205,15 @@ pub mod test {
             xzs[i] = (x, z);
         }
         xzs.shuffle(rng);
-        xzs.into_iter()
-            .map(move |(x, z)| reader.get_chunk(x, z).unwrap().unwrap().nbt.clone())
+        xzs.into_iter().map(move |(x, z)| {
+            match &reader.get_chunk(x, z).unwrap().unwrap().nbt {
+                ChunkNbt::Large => panic!(concat!(
+                    "This chunk is too large to save in .mca file, so it do not contains any bytes. ",
+                    "If you are testing, use another .mca file instead.",
+                )),
+                ChunkNbt::Small(nbt) => nbt.clone(),
+            }
+        })
     }
     pub fn get_test_chunk_by_xz(path: &PathBuf, x: usize, z: usize) -> Option<ChunkWithTimestamp> {
         let mut reader = MCAReader::from_file(path, false).unwrap();

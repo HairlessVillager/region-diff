@@ -17,7 +17,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let new =
         fs::read("resources/test-payload/region/mca/hairlessvillager-0/20250512.mca").unwrap();
 
-    c.bench_function("mca diff", |b| {
+    c.bench_function("mca_diff", |b| {
         b.iter(|| {
             black_box(MCADiff::from_compare(black_box(&old), black_box(&new)));
         })

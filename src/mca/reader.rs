@@ -3,8 +3,7 @@ use std::path::PathBuf;
 
 use crate::compress::CompressionType;
 
-use super::SECTOR_SIZE;
-use super::{ChunkWithTimestamp, HeaderEntry};
+use super::{ChunkNbt, ChunkWithTimestamp, HeaderEntry, LARGE_FLAG, SECTOR_SIZE};
 
 #[derive(Debug, Clone)]
 pub enum LazyChunk {
@@ -165,15 +164,20 @@ fn read_header<R: Read + Seek>(
     Ok(headers)
 }
 
-fn read_chunk_nbt(sector_buf: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn read_chunk_nbt(sector_buf: &[u8]) -> Result<ChunkNbt, Box<dyn std::error::Error>> {
     let length =
         u32::from_be_bytes([sector_buf[0], sector_buf[1], sector_buf[2], sector_buf[3]]) as usize;
 
     let compression_type = sector_buf[4];
     let data = &sector_buf[5..length + 4];
 
-    let nbt = CompressionType::from_magic(compression_type).decompress_all(data)?;
-    Ok(nbt)
+    match compression_type & LARGE_FLAG {
+        LARGE_FLAG => Ok(ChunkNbt::Large),
+        _ => {
+            let nbt = CompressionType::from_magic(compression_type).decompress_all(data)?;
+            Ok(ChunkNbt::Small(nbt))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -250,7 +254,10 @@ mod tests {
         match chunk {
             LazyChunk::Some(chunk) => {
                 assert_eq!(chunk.timestamp, 1);
-                assert!(!chunk.nbt.is_empty());
+                match chunk.nbt {
+                    ChunkNbt::Large => panic!("Chunk should not so large"),
+                    ChunkNbt::Small(nbt) => assert!(!nbt.is_empty()),
+                }
             }
             _ => panic!("Chunk should be Some, but got {:?}", chunk),
         }
@@ -274,6 +281,7 @@ mod tests {
             }
         }
     }
+
     #[test]
     fn test_fastnbt_works() {
         use fastnbt::{Value, nbt};

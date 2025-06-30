@@ -55,7 +55,7 @@ impl CompressionType {
         }
     }
     pub fn from_magic(magic: u8) -> Self {
-        match magic {
+        match magic & 0b_0111_1111 {
             1 => CompressionType::Gzip,
             2 => CompressionType::Zlib,
             3 => CompressionType::No,

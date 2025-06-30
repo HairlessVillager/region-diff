@@ -7,6 +7,7 @@ use fastnbt::Value;
 pub use reader::{LazyChunk, MCAReader};
 
 pub const SECTOR_SIZE: usize = 4096;
+pub const LARGE_FLAG: u8 = 0b_1000_0000;
 
 #[derive(Debug, Clone)]
 struct HeaderEntry {
@@ -29,15 +30,27 @@ impl HeaderEntry {
         }
     }
 }
+
 #[derive(Debug, Clone)]
-pub struct ChunkWithTimestamp {
-    pub timestamp: u32,
-    pub nbt: Vec<u8>,
+pub enum ChunkNbt {
+    Small(Vec<u8>),
+    Large, // so large that saved to a extra .mcc file, see also: https://minecraft.wiki/w/Region_file_format#Payload
 }
 
-impl PartialEq for ChunkWithTimestamp {
+impl PartialEq for ChunkNbt {
     fn eq(&self, other: &Self) -> bool {
-        self.timestamp == other.timestamp
-            && fastnbt::from_bytes::<Value>(&self.nbt) == fastnbt::from_bytes::<Value>(&other.nbt)
+        match (self, other) {
+            (ChunkNbt::Large, ChunkNbt::Large) => true,
+            (ChunkNbt::Small(self_nbt), ChunkNbt::Small(other_nbt)) => {
+                fastnbt::from_bytes::<Value>(&self_nbt) == fastnbt::from_bytes::<Value>(&other_nbt)
+            }
+            _ => false,
+        }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChunkWithTimestamp {
+    pub timestamp: u32,
+    pub nbt: ChunkNbt,
 }
