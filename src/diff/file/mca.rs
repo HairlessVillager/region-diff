@@ -585,7 +585,9 @@ impl Diff<Vec<u8>> for MCADiff {
             }
         }
 
-        builder.to_bytes(CompressionType::Zlib)
+        builder
+            .to_bytes(CompressionType::Zlib)
+            .expect("Failed to build bytes")
     }
 
     fn revert(&self, new: &Vec<u8>) -> Vec<u8> {
@@ -682,7 +684,9 @@ impl Diff<Vec<u8>> for MCADiff {
             }
         }
 
-        builder.to_bytes(CompressionType::Zlib)
+        builder
+            .to_bytes(CompressionType::Zlib)
+            .expect("Failed to build bytes")
     }
 }
 
@@ -784,32 +788,35 @@ mod tests {
     fn test_diff_squash() {
         with_test_config(TEST_CONFIG.clone(), || {
             for paths in all_file_iter(crate::FileType::RegionMca) {
-                for window in paths.collect::<Vec<_>>().windows(3) {
-                    let v0 = fs::read(window[0].clone()).unwrap();
-                    let v1 = fs::read(window[1].clone()).unwrap();
-                    let v2 = fs::read(window[2].clone()).unwrap();
-                    let diff_v01 = MCADiff::from_compare(&v0, &v1);
-                    let diff_v12 = MCADiff::from_compare(&v1, &v2);
-                    let squashed_diff = MCADiff::from_squash(&diff_v01, &diff_v12);
+                let files: Vec<_> = paths.collect();
+                if files.len() < 3 {
+                    continue;
+                }
+
+                // Calculate diffs between consecutive files using windows(2)
+                let diffs: Vec<_> = files
+                    .windows(2)
+                    .map(|window| {
+                        let old = fs::read(&window[0]).unwrap();
+                        let new = fs::read(&window[1]).unwrap();
+                        MCADiff::from_compare(&old, &new)
+                    })
+                    .collect();
+
+                // Test squash operation using windows(3) to get three consecutive files
+                for (i, window) in files.windows(3).enumerate() {
+                    let v0 = fs::read(&window[0]).unwrap();
+                    let v2 = fs::read(&window[2]).unwrap();
+
+                    // Use pre-calculated diffs to avoid recomputation
+                    let squashed_diff = MCADiff::from_squash(&diffs[i], &diffs[i + 1]);
+
                     let patched_v0 = squashed_diff.patch(&v0);
                     let reverted_v2 = squashed_diff.revert(&v2);
                     assert_mca_eq(&v2, &patched_v0);
                     assert_mca_eq(&v0, &reverted_v2);
                 }
             }
-        });
-    }
-    #[test]
-    #[ignore = "use benchmark test"]
-    fn test_time_cost() {
-        // The next performance hotspot is the diff of sections, but since the
-        // current performance is already good enough, I don't plan to
-        // optimize this area in the near future.
-        with_test_config(TEST_CONFIG.clone(), || {
-            log::debug!("reading files...");
-            let a = fs::read("./resources/mca/r.1.2.20250515.mca").unwrap();
-            let b = fs::read("./resources/mca/r.1.2.20250516.mca").unwrap();
-            MCADiff::from_compare(&a, &b);
         });
     }
 }

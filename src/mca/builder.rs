@@ -1,4 +1,4 @@
-use super::{ChunkWithTimestamp, SECTOR_SIZE};
+use super::{ChunkWithTimestamp, MCAError, SECTOR_SIZE};
 use crate::{
     compress::CompressionType,
     mca::{ChunkNbt, LARGE_FLAG},
@@ -18,15 +18,21 @@ impl<'a> MCABuilder<'a> {
         let i = x + z * 32;
         self.chunks[i] = Some(chunk);
     }
-    pub fn to_bytes(&self, compression_type: CompressionType) -> Vec<u8> {
+    pub fn to_bytes(&self, compression_type: CompressionType) -> Result<Vec<u8>, MCAError> {
         // parallel compression
         let mut results = parallel_process_with_cost_estimator(
             create_chunk_ixz_iter(),
-            |(i, _, _)| match self.chunks[*i] {
+            |(i, x, z)| match self.chunks[*i] {
                 None => None,
                 Some(chunk) => match &chunk.nbt {
                     ChunkNbt::Large => None,
-                    ChunkNbt::Small(nbt) => Some(compression_type.compress_all(nbt).unwrap()),
+                    ChunkNbt::Small(nbt) => Some(compression_type.compress_all(nbt).map_err(|e| {
+                        MCAError::Compression {
+                            x: *x,
+                            z: *z,
+                            reason: e.to_string(),
+                        }
+                    })),
                 },
             },
             |(i, _, _)| match self.chunks[*i] {
@@ -52,6 +58,12 @@ impl<'a> MCABuilder<'a> {
         buffer.extend_from_slice(&[0; SECTOR_SIZE * 2]);
 
         for ((i, _, _), compressed_nbt, _) in results {
+            let nbt = match compressed_nbt {
+                Some(Ok(nbt)) => Some(nbt),
+                Some(Err(e)) => return Err(e),
+                None => None,
+            };
+
             let chunk = self.chunks[i];
 
             // calculate header info
@@ -59,7 +71,7 @@ impl<'a> MCABuilder<'a> {
                 None => (0, 0, 0),
                 Some(chunk) => {
                     let sector_offset = buffer.len() / SECTOR_SIZE;
-                    match compressed_nbt {
+                    match nbt {
                         Some(ref nbt) => {
                             // `+ 5` for chunk data header (4 for length and 1 for compression type)
                             // `+ SECTOR_SIZE - 1` for align to SECTOR_SIZE
@@ -74,7 +86,7 @@ impl<'a> MCABuilder<'a> {
             // write body if chunk exists
             if let Some(_) = chunk {
                 // small chunk
-                if let Some(nbt) = compressed_nbt {
+                if let Some(nbt) = nbt {
                     buffer.extend_from_slice(&(nbt.len() as u32 + 1).to_be_bytes());
                     buffer.push(compression_type.to_magic() as u8);
                     buffer.extend_from_slice(&nbt);
@@ -101,8 +113,7 @@ impl<'a> MCABuilder<'a> {
             buffer[header_ts_offset..header_ts_offset + 4]
                 .copy_from_slice(&(timestamp as u32).to_be_bytes());
         }
-
-        buffer
+        Ok(buffer)
     }
 }
 
@@ -127,31 +138,36 @@ mod tests {
         with_test_config(TEST_CONFIG.clone(), || {
             let mca_0 =
                 fs::read("./resources/test-payload/region/mca/hairlessvillager-0/20250516.mca")
-                    .unwrap();
+                    .expect("Failed to read test MCA file");
 
-            let reader_0 = MCAReader::from_bytes(&mca_0).unwrap();
+            let reader_0 = MCAReader::from_bytes(&mca_0).expect("Failed to create MCA reader");
             let mut builder_0 = MCABuilder::new();
             for (_, x, z) in create_chunk_ixz_iter() {
                 let chunk = reader_0.get_chunk_lazily(x, z);
                 match chunk {
                     LazyChunk::Unloaded => panic!("invalid MCAReader"),
                     LazyChunk::NotExists => (),
-                    LazyChunk::Some(chunk) => builder_0.set_chunk(x, z, chunk),
+                    LazyChunk::Some(chunk) => builder_0.set_chunk(x, z, &chunk),
                 }
             }
-            let mca_1 = builder_0.to_bytes(CompressionType::Zlib);
+            let mca_1 = builder_0
+                .to_bytes(CompressionType::Zlib)
+                .expect("Failed to build MCA bytes");
 
-            let reader_1 = MCAReader::from_bytes(&mca_1).unwrap();
+            let reader_1 = MCAReader::from_bytes(&mca_1)
+                .expect("Failed to create MCA reader from built bytes");
             let mut builder_1 = MCABuilder::new();
             for (_, x, z) in create_chunk_ixz_iter() {
                 let chunk = reader_1.get_chunk_lazily(x, z);
                 match chunk {
                     LazyChunk::Unloaded => panic!("invalid MCAReader"),
                     LazyChunk::NotExists => (),
-                    LazyChunk::Some(chunk) => builder_1.set_chunk(x, z, chunk),
+                    LazyChunk::Some(chunk) => builder_1.set_chunk(x, z, &chunk),
                 }
             }
-            let mca_2 = builder_1.to_bytes(CompressionType::Zlib);
+            let mca_2 = builder_1
+                .to_bytes(CompressionType::Zlib)
+                .expect("Failed to rebuild MCA bytes");
 
             assert_eq!(mca_1, mca_2);
         });

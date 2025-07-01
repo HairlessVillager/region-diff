@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::compress::CompressionType;
 
-use super::{ChunkNbt, ChunkWithTimestamp, HeaderEntry, LARGE_FLAG, SECTOR_SIZE};
+use super::{ChunkNbt, ChunkWithTimestamp, HeaderEntry, LARGE_FLAG, MCAError, SECTOR_SIZE};
 
 #[derive(Debug, Clone)]
 pub enum LazyChunk {
@@ -19,7 +19,7 @@ pub struct MCAReader<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> MCAReader<R> {
-    fn from_reader(mut reader: R, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    fn from_reader(mut reader: R, lazy: bool) -> Result<Self, MCAError> {
         let mut chunks = [const { LazyChunk::Unloaded }; 1024];
         let header = read_header(&mut reader)?;
 
@@ -31,20 +31,18 @@ impl<R: Read + Seek> MCAReader<R> {
                     0 => LazyChunk::NotExists,
                     1..=u32::MAX => {
                         let offset = (header_entry.sector_offset as u64) * (SECTOR_SIZE as u64);
-                        let _ = reader.seek(std::io::SeekFrom::Start(offset));
+                        reader.seek(std::io::SeekFrom::Start(offset))?;
 
                         let mut sector_buf =
                             vec![0u8; header_entry.sector_count as usize * SECTOR_SIZE];
-                        reader.read_exact(&mut sector_buf).map_err(|e| {
-                            format!(
-                                "Sector {} is out of bounds. Original error: {}",
-                                header_entry.idx, e
-                            )
-                        })?;
+                        reader.read_exact(&mut sector_buf)?;
                         LazyChunk::Some(ChunkWithTimestamp {
                             timestamp: header_entry.timestamp,
-                            nbt: read_chunk_nbt(&sector_buf)
-                                .map_err(|e| format!("decompression error: {}", &e))?,
+                            nbt: read_chunk_nbt(
+                                &sector_buf,
+                                header_entry.idx % 32,
+                                header_entry.idx / 32,
+                            )?,
                         })
                     }
                 }
@@ -61,7 +59,7 @@ impl<R: Read + Seek> MCAReader<R> {
         &mut self,
         x: usize,
         z: usize,
-    ) -> Result<Option<&ChunkWithTimestamp>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<&ChunkWithTimestamp>, MCAError> {
         use std::io::SeekFrom;
 
         let idx = x + 32 * z;
@@ -80,24 +78,23 @@ impl<R: Read + Seek> MCAReader<R> {
 
         let mut sector_buf = vec![0u8; header.sector_count as usize * SECTOR_SIZE];
         let offset = (header.sector_offset as u64) * (SECTOR_SIZE as u64);
-        self.mca_reader
-            .seek(SeekFrom::Start(offset))
-            .map_err(|e| format!("seek failed: {}", &e))?;
-        self.mca_reader
-            .read_exact(&mut sector_buf)
-            .map_err(|e| format!("read failed: {}", &e))?;
+        self.mca_reader.seek(SeekFrom::Start(offset))?;
+        self.mca_reader.read_exact(&mut sector_buf)?;
 
         let chunk = ChunkWithTimestamp {
             timestamp: header.timestamp,
-            nbt: read_chunk_nbt(&sector_buf)
-                .map_err(|e| format!("decompression failed: {}", &e))?,
+            nbt: read_chunk_nbt(&sector_buf, x, z)?,
         };
 
         self.chunks[idx] = LazyChunk::Some(chunk);
 
         match &self.chunks[idx] {
             LazyChunk::Some(chunk) => Ok(Some(chunk)),
-            _ => Err("Failed to load chunk".into()),
+            _ => Err(MCAError::ChunkLoadFailed {
+                x,
+                z,
+                reason: "Failed to load chunk data".to_string(),
+            }),
         }
     }
     pub fn get_chunk_lazily(&self, x: usize, z: usize) -> &LazyChunk {
@@ -111,23 +108,21 @@ impl<R: Read + Seek> MCAReader<R> {
 }
 
 impl MCAReader<std::io::BufReader<std::fs::File>> {
-    pub fn from_file(path: &PathBuf, lazy: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file(path: &PathBuf, lazy: bool) -> Result<Self, MCAError> {
         use std::{fs::File, io::BufReader};
 
-        let file = File::open(path).map_err(|e| format!("open file failed: {}", &e))?;
+        let file = File::open(path)?;
         let reader = BufReader::new(file);
         Self::from_reader(reader, lazy)
     }
 }
 impl<'a> MCAReader<Cursor<&'a [u8]>> {
-    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, MCAError> {
         let reader = Cursor::new(bytes);
         Self::from_reader(reader, false)
     }
 }
-fn read_header<R: Read + Seek>(
-    reader: &mut R,
-) -> Result<[HeaderEntry; 1024], Box<dyn std::error::Error>> {
+fn read_header<R: Read + Seek>(reader: &mut R) -> Result<[HeaderEntry; 1024], MCAError> {
     let mut headers = std::array::from_fn(|_| HeaderEntry {
         idx: 0,
         sector_offset: 0,
@@ -138,9 +133,7 @@ fn read_header<R: Read + Seek>(
     // read locations
     for (idx, _offset) in (0x0000..0x0fff).step_by(4).enumerate() {
         let mut buf = [0u8; 4];
-        reader
-            .read_exact(&mut buf)
-            .map_err(|e| format!("read failed: {}", &e))?;
+        reader.read_exact(&mut buf)?;
         let sector_offset = u32::from_be_bytes([0, buf[0], buf[1], buf[2]]);
         let sector_count = buf[3];
         headers[idx] = HeaderEntry {
@@ -154,9 +147,7 @@ fn read_header<R: Read + Seek>(
     // read timestamps
     for (idx, _offset) in (0x1000..0x1fff).step_by(4).enumerate() {
         let mut buf = [0u8; 4];
-        reader
-            .read_exact(&mut buf)
-            .map_err(|e| format!("read failed: {}", &e))?;
+        reader.read_exact(&mut buf)?;
         let timestamp = u32::from_be_bytes(buf);
         headers[idx].timestamp = timestamp;
     }
@@ -164,7 +155,7 @@ fn read_header<R: Read + Seek>(
     Ok(headers)
 }
 
-fn read_chunk_nbt(sector_buf: &[u8]) -> Result<ChunkNbt, Box<dyn std::error::Error>> {
+fn read_chunk_nbt(sector_buf: &[u8], x: usize, z: usize) -> Result<ChunkNbt, MCAError> {
     let length =
         u32::from_be_bytes([sector_buf[0], sector_buf[1], sector_buf[2], sector_buf[3]]) as usize;
 
@@ -174,7 +165,13 @@ fn read_chunk_nbt(sector_buf: &[u8]) -> Result<ChunkNbt, Box<dyn std::error::Err
     match compression_type & LARGE_FLAG {
         LARGE_FLAG => Ok(ChunkNbt::Large),
         _ => {
-            let nbt = CompressionType::from_magic(compression_type).decompress_all(data)?;
+            let nbt = CompressionType::from_magic(compression_type)
+                .decompress_all(data)
+                .map_err(|e| MCAError::Compression {
+                    x,
+                    z,
+                    reason: e.to_string(),
+                })?;
             Ok(ChunkNbt::Small(nbt))
         }
     }
@@ -203,7 +200,7 @@ mod tests {
         header[4098] = 0;
         header[4099] = 1; // timestamp = 1
 
-        file.write_all(&header).unwrap();
+        file.write_all(&header).expect("Failed to write header");
 
         // create chunk data for first chunk (using zlib compression)
         let chunk_data = vec![1u8; 100]; // example NBT data
@@ -211,18 +208,22 @@ mod tests {
         {
             let mut encoder =
                 flate2::write::ZlibEncoder::new(&mut compressed, flate2::Compression::default());
-            encoder.write_all(&chunk_data).unwrap();
-            encoder.finish().unwrap();
+            encoder
+                .write_all(&chunk_data)
+                .expect("Failed to write chunk data");
+            encoder.finish().expect("Failed to finish compression");
         }
 
         file.write_all(&((compressed.len() + 1) as u32).to_be_bytes())
-            .unwrap(); // write chunk length, +1 for compression type byte
-        file.write_all(&[2]).unwrap(); // write compression type (2 = zlib)
-        file.write_all(&compressed).unwrap(); // write compressed data
+            .expect("Failed to write chunk length"); // write chunk length, +1 for compression type byte
+        file.write_all(&[2])
+            .expect("Failed to write compression type"); // write compression type (2 = zlib)
+        file.write_all(&compressed)
+            .expect("Failed to write compressed data"); // write compressed data
 
         // padding to 4096 bytes (one sector)
         let padding = vec![0u8; SECTOR_SIZE - (compressed.len() + 4)];
-        file.write_all(&padding).unwrap();
+        file.write_all(&padding).expect("Failed to write padding");
 
         buffer
     }
@@ -231,7 +232,7 @@ mod tests {
     fn test_header_reading() {
         let mut mca = create_test_mca();
         let mut reader = Cursor::new(&mut mca);
-        let headers = read_header(&mut reader).unwrap();
+        let headers = read_header(&mut reader).expect("Failed to read header");
 
         // test header for first chunk
         let header_entry = &headers[0];
@@ -241,13 +242,17 @@ mod tests {
 
         // test header for second chunk should be empty
         let header_entry = &headers[1];
-        assert!(!header_entry.is_available().unwrap());
+        assert!(
+            !header_entry
+                .is_available()
+                .expect("Failed to check availability")
+        );
     }
 
     #[test]
     fn test_mca_file_reading() {
         let mut mca = create_test_mca();
-        let mca = MCAReader::from_bytes(&mut mca).unwrap();
+        let mca = MCAReader::from_bytes(&mut mca).expect("Failed to create MCA reader");
 
         // test first chunk
         let chunk = mca.chunks[0].clone();
@@ -274,9 +279,10 @@ mod tests {
     fn test_real_files_reading() {
         for paths in all_file_iter(crate::FileType::RegionMca) {
             for path in paths {
-                let mut reader = MCAReader::from_file(&path, false).unwrap();
+                let mut reader =
+                    MCAReader::from_file(&path, false).expect("Failed to read MCA file");
                 for (_, x, z) in create_chunk_ixz_iter() {
-                    let _ = reader.get_chunk(x, z).unwrap();
+                    let _ = reader.get_chunk(x, z).expect("Failed to get chunk");
                 }
             }
         }
@@ -300,9 +306,9 @@ mod tests {
             "long_array": [1_i64, 2_i64, 3_i64]
         });
 
-        let y = fastnbt::to_bytes(&x).unwrap();
-        let z: Value = fastnbt::from_bytes(&y).unwrap();
-        let w = fastnbt::to_bytes(&z).unwrap();
+        let y = fastnbt::to_bytes(&x).expect("Failed to serialize NBT");
+        let z: Value = fastnbt::from_bytes(&y).expect("Failed to deserialize NBT");
+        let w = fastnbt::to_bytes(&z).expect("Failed to re-serialize NBT");
         assert_eq!(y, w);
         assert_eq!(format!("{:?}", x), format!("{:?}", z));
     }
