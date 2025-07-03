@@ -2,6 +2,7 @@ use std::io::{Cursor, Read, Seek};
 use std::path::PathBuf;
 
 use crate::compress::CompressionType;
+use crate::util::{create_chunk_ixz_iter, parallel::parallel_process_with_cost_estimator};
 
 use super::{ChunkNbt, ChunkWithTimestamp, HeaderEntry, LARGE_FLAG, MCAError, SECTOR_SIZE};
 
@@ -77,8 +78,8 @@ impl<R: Read + Seek> MCAReader<R> {
         }
 
         let mut sector_buf = vec![0u8; header.sector_count as usize * SECTOR_SIZE];
-        let offset = (header.sector_offset as u64) * (SECTOR_SIZE as u64);
-        self.mca_reader.seek(SeekFrom::Start(offset))?;
+        let offset = (header.sector_offset as usize) * SECTOR_SIZE;
+        self.mca_reader.seek(SeekFrom::Start(offset as u64))?;
         self.mca_reader.read_exact(&mut sector_buf)?;
 
         let chunk = ChunkWithTimestamp {
@@ -110,7 +111,6 @@ impl<R: Read + Seek> MCAReader<R> {
 impl MCAReader<std::io::BufReader<std::fs::File>> {
     pub fn from_file(path: &PathBuf, lazy: bool) -> Result<Self, MCAError> {
         use std::{fs::File, io::BufReader};
-
         let file = File::open(path)?;
         let reader = BufReader::new(file);
         Self::from_reader(reader, lazy)
@@ -118,8 +118,43 @@ impl MCAReader<std::io::BufReader<std::fs::File>> {
 }
 impl<'a> MCAReader<Cursor<&'a [u8]>> {
     pub fn from_bytes(bytes: &'a [u8]) -> Result<Self, MCAError> {
-        let reader = Cursor::new(bytes);
-        Self::from_reader(reader, false)
+        let mut chunks = [const { LazyChunk::Unloaded }; 1024];
+        let mut reader = Cursor::new(bytes);
+        let header = read_header(&mut reader)?;
+
+        let results = parallel_process_with_cost_estimator(
+            create_chunk_ixz_iter(),
+            |(i, x, z)| {
+                let header_entry = &header[*i];
+                match header_entry.sector_offset {
+                    0 => Ok(None),
+                    1..=u32::MAX => {
+                        let offset = header_entry.sector_offset as usize * SECTOR_SIZE;
+                        let size = header_entry.sector_count as usize * SECTOR_SIZE;
+                        let sector_data = &bytes[offset..offset + size];
+                        Ok(Some(ChunkWithTimestamp {
+                            timestamp: header_entry.timestamp,
+                            nbt: read_chunk_nbt(&sector_data, *x, *z)?,
+                        }))
+                    }
+                }
+            },
+            |(i, _, _)| header[*i].sector_count as usize,
+        );
+
+        for ((i, _, _), chunk_result, _) in results {
+            chunks[i] = match chunk_result {
+                Ok(Some(chunk)) => LazyChunk::Some(chunk),
+                Ok(None) => LazyChunk::NotExists,
+                Err(e) => return Err(e),
+            };
+        }
+
+        Ok(Self {
+            mca_reader: reader,
+            header,
+            chunks,
+        })
     }
 }
 fn read_header<R: Read + Seek>(reader: &mut R) -> Result<[HeaderEntry; 1024], MCAError> {
@@ -179,10 +214,16 @@ fn read_chunk_nbt(sector_buf: &[u8], x: usize, z: usize) -> Result<ChunkNbt, MCA
 
 #[cfg(test)]
 mod tests {
-    use crate::util::{create_chunk_ixz_iter, test::all_file_iter};
-
     use super::*;
+    use crate::{
+        config::{Config, with_test_config},
+        util::{create_chunk_ixz_iter, test::all_file_iter},
+    };
     use std::io::Write;
+    static TEST_CONFIG: Config = Config {
+        log_config: crate::config::LogConfig::NoLog,
+        threads: 16,
+    };
 
     fn create_test_mca() -> Vec<u8> {
         let mut buffer = Vec::new();
@@ -251,28 +292,29 @@ mod tests {
 
     #[test]
     fn test_mca_file_reading() {
-        let mut mca = create_test_mca();
-        let mca = MCAReader::from_bytes(&mut mca).expect("Failed to create MCA reader");
+        with_test_config(TEST_CONFIG.clone(), || {
+            let mut mca = create_test_mca();
+            let mca = MCAReader::from_bytes(&mut mca).expect("Failed to create MCA reader");
 
-        // test first chunk
-        let chunk = mca.chunks[0].clone();
-        match chunk {
-            LazyChunk::Some(chunk) => {
-                assert_eq!(chunk.timestamp, 1);
-                match chunk.nbt {
-                    ChunkNbt::Large => panic!("Chunk should not so large"),
-                    ChunkNbt::Small(nbt) => assert!(!nbt.is_empty()),
+            // test first chunk
+            let chunk = mca.chunks[0].clone();
+            match chunk {
+                LazyChunk::Some(chunk) => {
+                    assert_eq!(chunk.timestamp, 1);
+                    match chunk.nbt {
+                        ChunkNbt::Large => panic!("Chunk should not so large"),
+                        ChunkNbt::Small(nbt) => assert!(!nbt.is_empty()),
+                    }
                 }
+                _ => panic!("Chunk should be Some, but got {:?}", chunk),
             }
-            _ => panic!("Chunk should be Some, but got {:?}", chunk),
-        }
-
-        // test second chunk should be empty
-        let chunk = mca.chunks[1].clone();
-        match chunk {
-            LazyChunk::NotExists => (),
-            _ => panic!("Chunk should be NotExists, but got {:?}", chunk),
-        }
+            // test second chunk should be empty
+            let chunk = mca.chunks[1].clone();
+            match chunk {
+                LazyChunk::NotExists => (),
+                _ => panic!("Chunk should be NotExists, but got {:?}", chunk),
+            }
+        });
     }
 
     #[test]
