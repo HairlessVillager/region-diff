@@ -5,18 +5,21 @@ pub mod logging;
 pub mod mca;
 pub mod util;
 
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::{
     fs::{self, File},
     io::{Cursor, Write},
     path::PathBuf,
 };
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
-
 use crate::{
     compress::CompressionType,
     config::{Config, LogConfig, init_config},
-    diff::{Diff, file::MCADiff},
+    diff::{
+        Diff,
+        chunk::{EntitiesChunkDiff, RegionChunkDiff},
+        file::{MCADiff, MCCDiff},
+    },
     util::serde::{de, ser},
 };
 
@@ -99,8 +102,10 @@ struct SquashArgs {
 pub enum FileType {
     /// Minecraft Region File > region/*.mca
     RegionMca,
-    /// [TODO] Minecraft Region File > region/*.mcc
+    /// Minecraft Region File > region/*.mcc
     RegionMcc,
+    /// Minecraft Entities File > entities/*.mca
+    EntitiesMca,
 }
 
 static ERR_MSG_READ: &str = "Failed to read file";
@@ -125,10 +130,17 @@ pub fn main() {
             log::info!("comparing...");
             let diff = match cli.filetype {
                 FileType::RegionMca => {
-                    let diff = MCADiff::from_compare(&old, &new);
+                    let diff: MCADiff<RegionChunkDiff> = MCADiff::from_compare(&old, &new);
                     ser(diff)
                 }
-                FileType::RegionMcc => todo!(),
+                FileType::RegionMcc => {
+                    let diff: MCCDiff<RegionChunkDiff> = MCCDiff::from_compare(&old, &new);
+                    ser(diff)
+                }
+                FileType::EntitiesMca => {
+                    let diff: MCADiff<EntitiesChunkDiff> = MCADiff::from_compare(&old, &new);
+                    ser(diff)
+                }
             };
             log::info!("writing diff file...");
             let mut reader = Cursor::new(diff);
@@ -154,12 +166,23 @@ pub fn main() {
             log::info!("squashing...");
             let squashed = match cli.filetype {
                 FileType::RegionMca => {
-                    let base: MCADiff = de(&base);
-                    let squashing: MCADiff = de(&squashing);
+                    let base: MCADiff<RegionChunkDiff> = de(&base);
+                    let squashing: MCADiff<RegionChunkDiff> = de(&squashing);
                     let squashed = MCADiff::from_squash(&base, &squashing);
                     ser(squashed)
                 }
-                FileType::RegionMcc => todo!(),
+                FileType::RegionMcc => {
+                    let base: MCCDiff<RegionChunkDiff> = de(&base);
+                    let squashing: MCCDiff<RegionChunkDiff> = de(&squashing);
+                    let squashed = MCCDiff::from_squash(&base, &squashing);
+                    ser(squashed)
+                }
+                FileType::EntitiesMca => {
+                    let base: MCADiff<EntitiesChunkDiff> = de(&base);
+                    let squashing: MCADiff<EntitiesChunkDiff> = de(&squashing);
+                    let squashed = MCADiff::from_squash(&base, &squashing);
+                    ser(squashed)
+                }
             };
             log::info!("writing squashed diff file...");
             let mut reader = Cursor::new(squashed);
@@ -181,10 +204,17 @@ pub fn main() {
             log::info!("patching...");
             let patched = match cli.filetype {
                 FileType::RegionMca => {
-                    let diff: MCADiff = de(&diff);
+                    let diff: MCADiff<RegionChunkDiff> = de(&diff);
                     diff.patch(&old)
                 }
-                FileType::RegionMcc => todo!(),
+                FileType::RegionMcc => {
+                    let diff: MCCDiff<RegionChunkDiff> = de(&diff);
+                    diff.patch(&old)
+                }
+                FileType::EntitiesMca => {
+                    let diff: MCADiff<EntitiesChunkDiff> = de(&diff);
+                    diff.patch(&old)
+                }
             };
             log::info!("writing patched file...");
             let mut writer = File::create(PathBuf::from(args.patched)).expect(ERR_MSG_CREATE);
@@ -203,10 +233,17 @@ pub fn main() {
             log::info!("reverting...");
             let reverted = match cli.filetype {
                 FileType::RegionMca => {
-                    let diff: MCADiff = de(&diff);
+                    let diff: MCADiff<RegionChunkDiff> = de(&diff);
                     diff.revert(&new)
                 }
-                FileType::RegionMcc => todo!(),
+                FileType::RegionMcc => {
+                    let diff: MCCDiff<RegionChunkDiff> = de(&diff);
+                    diff.revert(&new)
+                }
+                FileType::EntitiesMca => {
+                    let diff: MCADiff<EntitiesChunkDiff> = de(&diff);
+                    diff.revert(&new)
+                }
             };
             log::info!("writing reverted file...");
             let mut writer = File::create(PathBuf::from(args.reverted)).expect(ERR_MSG_CREATE);

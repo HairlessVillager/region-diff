@@ -1,6 +1,6 @@
 pub mod base;
 pub mod file;
-pub mod nbt;
+pub mod chunk;
 
 use bincode::{Decode, Encode};
 

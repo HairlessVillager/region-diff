@@ -229,7 +229,7 @@ impl MyersDiff {
                     match v0_ptr {
                         VxPtr::Disable(_) => v0_ptr = VxPtr::Enable(re.v0_idx),
                         VxPtr::Enable(_) => {
-                            panic!("v0_ptr is not disabled (but ={:?}) when met BO", v0_ptr)
+                            panic!("'v0_ptr' is not disabled (but ={:?}) when met BO", v0_ptr)
                         }
                     }
                     match v1_ptr {
@@ -247,7 +247,7 @@ impl MyersDiff {
                 NamedReplaceEndpoint::BC(re) => {
                     match v0_ptr {
                         VxPtr::Disable(_) => {
-                            panic!("v0_ptr is not enabled (but ={:?}) when met BO", v0_ptr)
+                            panic!("'v0_ptr' is not enabled (but ={:?}) when met BO", v0_ptr)
                         }
                         VxPtr::Enable(ptr) => {
                             let size = re.v0_idx - ptr;
@@ -290,7 +290,7 @@ impl MyersDiff {
                     match v2_ptr {
                         VxPtr::Disable(_) => v2_ptr = VxPtr::Enable(re.v2_idx),
                         VxPtr::Enable(ptr) => {
-                            panic!("v2_ptr is not closed (={}) when met MO", ptr)
+                            panic!("'v2_ptr' is not closed (={}) when met MO", ptr)
                         }
                     }
                     diff_counter += 1;
@@ -315,7 +315,7 @@ impl MyersDiff {
                     }
                     match v2_ptr {
                         VxPtr::Disable(_) => {
-                            panic!("v2_ptr is not enabled (but ={:?}) when met MO", v2_ptr)
+                            panic!("'v2_ptr' is not enabled (but ={:?}) when met MO", v2_ptr)
                         }
                         VxPtr::Enable(ptr) => {
                             let size = re.v2_idx - ptr;

@@ -3,18 +3,24 @@ use fastnbt::Value;
 
 use crate::{
     compress::CompressionType,
-    diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
+    diff::{Diff, base::BlobDiff},
     util::nbt_serde::{de, ser},
 };
 
 #[derive(Debug, Clone, Encode, Decode)]
-pub enum MCCDiff {
+pub enum MCCDiff<D>
+where
+    D: Diff<Value>,
+{
     Create(BlobDiff),
     Delete(BlobDiff),
-    Update(ChunkDiff),
+    Update(D),
 }
 
-impl Diff<Vec<u8>> for MCCDiff {
+impl<D> Diff<Vec<u8>> for MCCDiff<D>
+where
+    D: Diff<Value> + bincode::Decode<MCCDiff<D>>,
+{
     fn from_compare(old: &Vec<u8>, new: &Vec<u8>) -> Self
     where
         Self: Sized,
@@ -43,7 +49,7 @@ impl Diff<Vec<u8>> for MCCDiff {
                 let new_nbt: Value = de(&CompressionType::Zlib
                     .decompress_all(new)
                     .expect("Failed to decompress new MCC file for update"));
-                Self::Update(ChunkDiff::from_compare(&old_nbt, &new_nbt))
+                Self::Update(D::from_compare(&old_nbt, &new_nbt))
             }
         }
     }
@@ -67,7 +73,7 @@ impl Diff<Vec<u8>> for MCCDiff {
             }
             // Update -> Update => Update
             (Self::Update(base_chunk), Self::Update(squashing_chunk)) => {
-                Self::Update(ChunkDiff::from_squash(base_chunk, squashing_chunk))
+                Self::Update(D::from_squash(base_chunk, squashing_chunk))
             }
             // Update -> Delete => Delete
             (Self::Update(base_chunk), Self::Delete(squashing_blob)) => {
@@ -79,7 +85,7 @@ impl Diff<Vec<u8>> for MCCDiff {
             (Self::Delete(base_blob), Self::Create(squashing_blob)) => {
                 let old_nbt = de(&base_blob.revert0());
                 let new_nbt = de(&squashing_blob.patch0());
-                Self::Update(ChunkDiff::from_compare(&old_nbt, &new_nbt))
+                Self::Update(D::from_compare(&old_nbt, &new_nbt))
             }
             _ => panic!("Invalid squash combination for MCCDiff"),
         }
@@ -140,6 +146,7 @@ impl Diff<Vec<u8>> for MCCDiff {
 mod tests {
     use super::*;
     use crate::config::{Config, LogConfig, with_test_config};
+    use crate::diff::chunk::RegionChunkDiff;
     use crate::util::test::assert_mcc_eq;
     use std::fs;
 
@@ -161,7 +168,7 @@ mod tests {
         with_test_config(TEST_CONFIG.clone(), || {
             let v1 = read_mcc_file("v1");
             let v2 = read_mcc_file("v2");
-            let diff = MCCDiff::from_compare(&v1, &v2);
+            let diff = MCCDiff::<RegionChunkDiff>::from_compare(&v1, &v2);
             let patched_v1 = diff.patch(&v1);
             let reverted_v2 = diff.revert(&v2);
             assert_mcc_eq(patched_v1, v2);
@@ -175,9 +182,9 @@ mod tests {
             let v1 = read_mcc_file("v1");
             let v2 = read_mcc_file("v2");
             let v3 = read_mcc_file("v3");
-            let diff_v1_v2 = MCCDiff::from_compare(&v1, &v2);
-            let diff_v2_v3 = MCCDiff::from_compare(&v2, &v3);
-            let squashed_diff = MCCDiff::from_squash(&diff_v1_v2, &diff_v2_v3);
+            let diff_v1_v2 = MCCDiff::<RegionChunkDiff>::from_compare(&v1, &v2);
+            let diff_v2_v3 = MCCDiff::<RegionChunkDiff>::from_compare(&v2, &v3);
+            let squashed_diff = MCCDiff::<RegionChunkDiff>::from_squash(&diff_v1_v2, &diff_v2_v3);
             let patched_v1 = squashed_diff.patch(&v1);
             let reverted_v3 = squashed_diff.revert(&v3);
             assert_mcc_eq(patched_v1, v3);

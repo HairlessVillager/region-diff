@@ -131,7 +131,8 @@ pub mod test {
         let mut path = PathBuf::from("resources/test-payload");
         path.push(PathBuf::from(match file_type {
             FileType::RegionMca => "region/mca",
-            FileType::RegionMcc => todo!(),
+            FileType::RegionMcc => "region/mcc",
+            FileType::EntitiesMca => "entities/mca",
         }));
         path
     }
@@ -207,13 +208,21 @@ pub mod test {
             xzs[i] = (x, z);
         }
         xzs.shuffle(rng);
-        xzs.into_iter().map(move |(x, z)| {
-            match &reader.get_chunk(x, z).unwrap().unwrap().nbt {
-                ChunkNbt::Large => panic!(concat!(
-                    "This chunk is too large to save in .mca file, so it do not contains any bytes. ",
-                    "If you are testing, use another .mca file instead.",
-                )),
-                ChunkNbt::Small(nbt) => nbt.clone(),
+        xzs.into_iter().filter_map(move |(x, z)| {
+            match reader.get_chunk(x, z) {
+                Ok(Some(chunk_data)) => {
+                    match &chunk_data.nbt {
+                        ChunkNbt::Small(nbt) => Some(nbt.clone()), // Return the valid chunk data.
+                        ChunkNbt::Large => panic!(concat!(
+                            "This chunk is too large to save in .mca file. ",
+                            "Use another .mca file for testing."
+                        )),
+                    }
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    panic!("Failed to read chunk at ({}, {}): {:?}", x, z, e);
+                }
             }
         })
     }

@@ -2,6 +2,7 @@ use std::{fs, hint::black_box, time::Duration};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
+use region_diff::diff::chunk::RegionChunkDiff;
 use region_diff::{
     config::{Config, init_config},
     diff::{Diff, file::MCADiff},
@@ -16,7 +17,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         fs::read("resources/test-payload/region/mca/hairlessvillager-0/20250511.mca").unwrap();
     let new =
         fs::read("resources/test-payload/region/mca/hairlessvillager-0/20250512.mca").unwrap();
-    let diff = MCADiff::from_compare(&old, &new);
+    let diff: MCADiff<RegionChunkDiff> = MCADiff::from_compare(&old, &new);
     c.bench_function("mca_patch_revert", |b| {
         b.iter(|| {
             black_box(MCADiff::patch(black_box(&diff), black_box(&old)));

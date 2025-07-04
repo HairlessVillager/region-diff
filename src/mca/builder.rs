@@ -88,15 +88,15 @@ impl<'a> MCABuilder<'a> {
                 // small chunk
                 if let Some(nbt) = nbt {
                     buffer.extend_from_slice(&(nbt.len() as u32 + 1).to_be_bytes());
-                    buffer.push(compression_type.to_magic() as u8);
+                    buffer.push(compression_type.to_magic());
                     buffer.extend_from_slice(&nbt);
                     let padding_size = sector_count * SECTOR_SIZE - (nbt.len() + 5);
                     buffer.extend(std::iter::repeat(0).take(padding_size));
                 }
                 // large chunk
                 else {
-                    buffer.extend_from_slice(&(1 as u32).to_be_bytes());
-                    buffer.push((compression_type.to_magic() as u8) | LARGE_FLAG);
+                    buffer.extend_from_slice(&1u32.to_be_bytes());
+                    buffer.push((compression_type.to_magic()) | LARGE_FLAG);
                     let padding_size = sector_count * SECTOR_SIZE - 5;
                     buffer.extend(std::iter::repeat(0).take(padding_size));
                 }
@@ -111,7 +111,7 @@ impl<'a> MCABuilder<'a> {
             // update header: timestamp part
             let header_ts_offset = header_loc_offset + SECTOR_SIZE;
             buffer[header_ts_offset..header_ts_offset + 4]
-                .copy_from_slice(&(timestamp as u32).to_be_bytes());
+                .copy_from_slice(&timestamp.to_be_bytes());
         }
         Ok(buffer)
     }

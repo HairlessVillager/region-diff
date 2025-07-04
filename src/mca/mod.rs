@@ -4,8 +4,9 @@ use std::fmt::Debug;
 use thiserror::Error;
 
 pub use builder::MCABuilder;
-use fastnbt::Value;
 pub use reader::{LazyChunk, MCAReader};
+
+use crate::util::nbt_serde::de;
 
 pub const SECTOR_SIZE: usize = 4096;
 pub const LARGE_FLAG: u8 = 0b_1000_0000;
@@ -63,12 +64,7 @@ impl PartialEq for ChunkNbt {
         match (self, other) {
             (ChunkNbt::Large, ChunkNbt::Large) => true,
             (ChunkNbt::Small(self_nbt), ChunkNbt::Small(other_nbt)) => {
-                let res1 = fastnbt::from_bytes::<Value>(&self_nbt);
-                let res2 = fastnbt::from_bytes::<Value>(&other_nbt);
-                match (res1, res2) {
-                    (Ok(v1), Ok(v2)) => v1 == v2,
-                    _ => false,
-                }
+                de(&self_nbt) == de(&other_nbt)
             }
             _ => false,
         }
