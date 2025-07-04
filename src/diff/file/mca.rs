@@ -5,7 +5,7 @@ use crate::util::{IXZ, create_chunk_ixz_iter};
 use crate::{
     diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
     mca::{ChunkWithTimestamp, LazyChunk, MCABuilder, MCAReader},
-    util::{fastnbt_deserialize as de, fastnbt_serialize as ser},
+    util::nbt_serde::{de, ser},
 };
 use bincode::{Decode, Encode};
 use log::{Level, log_enabled};
@@ -67,6 +67,8 @@ pub struct MCADiff {
 }
 
 fn log_cost_statistics<R>(result: &[(IXZ, R, Option<Duration>)]) {
+    static ERR_MSG: &str = "Failed to cost statistics";
+
     let len = result.len();
     let mut sorted_costs = result
         .iter()
@@ -74,22 +76,28 @@ fn log_cost_statistics<R>(result: &[(IXZ, R, Option<Duration>)]) {
         .collect::<Vec<_>>();
     sorted_costs.sort_by(|(_, a), (_, b)| b.cmp(a));
 
-    let total_cost = sorted_costs.iter().map(|e| e.1.unwrap()).sum::<Duration>();
+    let total_cost = sorted_costs
+        .iter()
+        .map(|e| e.1.expect(ERR_MSG))
+        .sum::<Duration>();
     log::debug!(
         "time costs stat:\n- total {:?}\n- avg   {:?}\n- p100  {:?}\n- p99   {:?}\n- p95   {:?}\n- p50   {:?}",
         total_cost,
         total_cost / len as u32,
-        sorted_costs[0].1.unwrap(),
-        sorted_costs[len / 100].1.unwrap(),
-        sorted_costs[len / 20].1.unwrap(),
-        sorted_costs[len / 2].1.unwrap(),
+        sorted_costs[0].1.expect(ERR_MSG),
+        sorted_costs[len / 100].1.expect(ERR_MSG),
+        sorted_costs[len / 20].1.expect(ERR_MSG),
+        sorted_costs[len / 2].1.expect(ERR_MSG),
     );
 
     log::debug!(
         "time costs top 8:\n{}",
         sorted_costs[0..8]
             .iter()
-            .map(|((i, x, z), d)| format!("- chunk {} ({}, {}) (cost {:?})", i, x, z, d.unwrap()))
+            .map(|((i, x, z), d)| {
+                let d = d.expect(ERR_MSG);
+                format!("- chunk {} ({}, {}) (cost {:?})", i, x, z, d)
+            })
             .collect::<Vec<_>>()
             .join("\n")
     );
@@ -99,10 +107,13 @@ fn enable_cost_stat() -> bool {
     log_enabled!(Level::Debug)
 }
 
+static ERR_MSG_OLD: &str = "Failed to parse old mca file";
+static ERR_MSG_NEW: &str = "Failed to parse new mca file";
+
 impl Diff<Vec<u8>> for MCADiff {
     fn from_compare(old: &Vec<u8>, new: &Vec<u8>) -> Self {
-        let reader_old = Arc::new(MCAReader::from_bytes(old).unwrap());
-        let reader_new = Arc::new(MCAReader::from_bytes(new).unwrap());
+        let reader_old = Arc::new(MCAReader::from_bytes(old).expect(ERR_MSG_OLD));
+        let reader_new = Arc::new(MCAReader::from_bytes(new).expect(ERR_MSG_NEW));
 
         let results = parallel_process_with_cost_estimator(
             create_chunk_ixz_iter(),
@@ -118,8 +129,8 @@ impl Diff<Vec<u8>> for MCADiff {
                         let old = reader_old.get_chunk_lazily(*x, *z);
                         let new = reader_new.get_chunk_lazily(*x, *z);
                         match (old, new) {
-                            (LazyChunk::Unloaded, _) => panic!("old chunk is unloaded"),
-                            (_, LazyChunk::Unloaded) => panic!("new chunk is unloaded"),
+                            (LazyChunk::Unloaded, _) => panic!("Old chunk is unloaded"),
+                            (_, LazyChunk::Unloaded) => panic!("New chunk is unloaded"),
                             (LazyChunk::NotExists, LazyChunk::NotExists) => {
                                 ChunkWithTimestampDiff::BothNotExist
                             }
@@ -237,8 +248,8 @@ impl Diff<Vec<u8>> for MCADiff {
                     ChunkWithTimestampDiff::CreateLarge(s_ts_diff) => {
                         ChunkWithTimestampDiff::CreateLarge(*s_ts_diff)
                     }
-                    _ => panic!(
-                        "impossible case: base diff {}, while squashing diff {}",
+                    _ => unreachable!(
+                        "Impossible case: base diff {}, while squashing diff {}",
                         base_diff.get_description(),
                         squashing_diff.get_description()
                     ),
@@ -256,8 +267,8 @@ impl Diff<Vec<u8>> for MCADiff {
                     ChunkWithTimestampDiff::CreateLarge(s_ts_diff) => {
                         ChunkWithTimestampDiff::UpdateLarge(b_ts_diff + s_ts_diff)
                     }
-                    _ => panic!(
-                        "impossible case: base diff {}, while squashing diff {}",
+                    _ => unreachable!(
+                        "Impossible case: base diff {}, while squashing diff {}",
                         base_diff.get_description(),
                         squashing_diff.get_description()
                     ),
@@ -282,8 +293,8 @@ impl Diff<Vec<u8>> for MCADiff {
                             b_blob_diff.clone(),
                         )
                     }
-                    _ => panic!(
-                        "impossible case: base diff {}, while squashing diff {}",
+                    _ => unreachable!(
+                        "Impossible case: base diff {}, while squashing diff {}",
                         base_diff.get_description(),
                         squashing_diff.get_description()
                     ),
@@ -319,8 +330,8 @@ impl Diff<Vec<u8>> for MCADiff {
                                 ),
                             )
                         }
-                        _ => panic!(
-                            "impossible case: base diff {}, while squashing diff {}",
+                        _ => unreachable!(
+                            "Impossible case: base diff {}, while squashing diff {}",
                             base_diff.get_description(),
                             squashing_diff.get_description()
                         ),
@@ -344,8 +355,8 @@ impl Diff<Vec<u8>> for MCADiff {
                     ChunkWithTimestampDiff::SmallToLarge(s_ts_diff, _) => {
                         ChunkWithTimestampDiff::CreateLarge(*s_ts_diff)
                     }
-                    _ => panic!(
-                        "impossible case: base diff {}, while squashing diff {}",
+                    _ => unreachable!(
+                        "Impossible case: base diff {}, while squashing diff {}",
                         base_diff.get_description(),
                         squashing_diff.get_description()
                     ),
@@ -370,8 +381,8 @@ impl Diff<Vec<u8>> for MCADiff {
                         ChunkWithTimestampDiff::SmallToLarge(s_ts_diff, _) => {
                             ChunkWithTimestampDiff::UpdateLarge(b_ts_diff + s_ts_diff)
                         }
-                        _ => panic!(
-                            "impossible case: base diff {}, while squashing diff {}",
+                        _ => unreachable!(
+                            "Impossible case: base diff {}, while squashing diff {}",
                             base_diff.get_description(),
                             squashing_diff.get_description()
                         ),
@@ -393,8 +404,8 @@ impl Diff<Vec<u8>> for MCADiff {
                             s_blob_diff.clone(),
                         )
                     }
-                    _ => panic!(
-                        "impossible case: base diff {}, while squashing diff {}",
+                    _ => unreachable!(
+                        "Impossible case: base diff {}, while squashing diff {}",
                         base_diff.get_description(),
                         squashing_diff.get_description()
                     ),
@@ -415,8 +426,8 @@ impl Diff<Vec<u8>> for MCADiff {
                             s_blob_diff.clone(),
                         )
                     }
-                    _ => panic!(
-                        "impossible case: base diff {}, while squashing diff {}",
+                    _ => unreachable!(
+                        "Impossible case: base diff {}, while squashing diff {}",
                         base_diff.get_description(),
                         squashing_diff.get_description()
                     ),
@@ -447,8 +458,8 @@ impl Diff<Vec<u8>> for MCADiff {
                                 ),
                             )
                         }
-                        _ => panic!(
-                            "impossible case: base diff {}, while squashing diff {}",
+                        _ => unreachable!(
+                            "Impossible case: base diff {}, while squashing diff {}",
                             base_diff.get_description(),
                             squashing_diff.get_description()
                         ),
@@ -464,8 +475,8 @@ impl Diff<Vec<u8>> for MCADiff {
                     | ChunkWithTimestampDiff::DeleteSmall(..)
                     | ChunkWithTimestampDiff::SmallToLarge(..)
                     | ChunkWithTimestampDiff::LargeToSmall(..) => base_diff.clone(),
-                    _ => panic!(
-                        "impossible case: base diff {}, while squashing diff {}",
+                    _ => unreachable!(
+                        "Impossible case: base diff {}, while squashing diff {}",
                         base_diff.get_description(),
                         squashing_diff.get_description()
                     ),
@@ -489,7 +500,7 @@ impl Diff<Vec<u8>> for MCADiff {
     }
 
     fn patch(&self, old: &Vec<u8>) -> Vec<u8> {
-        let reader = Arc::new(MCAReader::from_bytes(old).unwrap());
+        let reader = Arc::new(MCAReader::from_bytes(old).expect(ERR_MSG_OLD));
         let enable_cost_stat = log_enabled!(Level::Debug);
 
         let results = parallel_process(create_chunk_ixz_iter(), |(i, x, z)| {
@@ -497,7 +508,7 @@ impl Diff<Vec<u8>> for MCADiff {
             let chunk_diff = &self.chunks[*i];
 
             let new_chunk = match old_chunk {
-                LazyChunk::Unloaded => panic!("old chunk is unloaded"),
+                LazyChunk::Unloaded => panic!("Old chunk is unloaded"),
                 LazyChunk::NotExists => match chunk_diff {
                     ChunkWithTimestampDiff::BothNotExist => None,
                     ChunkWithTimestampDiff::CreateSmall(ts_diff, chunk_diff) => {
@@ -526,7 +537,7 @@ impl Diff<Vec<u8>> for MCADiff {
                                 timestamp: old_chunk
                                     .timestamp
                                     .checked_add_signed(*ts_diff)
-                                    .expect("timestamp overflow"),
+                                    .expect("Timestamp overflow"),
                                 nbt: ChunkNbt::Small(ser(&chunk_diff.patch(&de(&nbt)))),
                             })
                         }
@@ -535,7 +546,7 @@ impl Diff<Vec<u8>> for MCADiff {
                                 timestamp: old_chunk
                                     .timestamp
                                     .checked_add_signed(*ts_diff)
-                                    .expect("timestamp overflow"),
+                                    .expect("Timestamp overflow"),
                                 nbt: ChunkNbt::Large,
                             })
                         }
@@ -551,7 +562,7 @@ impl Diff<Vec<u8>> for MCADiff {
                             timestamp: old_chunk
                                 .timestamp
                                 .checked_add_signed(*ts_diff)
-                                .expect("timestamp overflow"),
+                                .expect("Timestamp overflow"),
                             nbt: ChunkNbt::Large,
                         }),
                         ChunkWithTimestampDiff::LargeToSmall(ts_diff, blob_diff) => {
@@ -559,7 +570,7 @@ impl Diff<Vec<u8>> for MCADiff {
                                 timestamp: old_chunk
                                     .timestamp
                                     .checked_add_signed(*ts_diff)
-                                    .expect("timestamp overflow"),
+                                    .expect("Timestamp overflow"),
                                 nbt: ChunkNbt::Small(blob_diff.patch0()),
                             })
                         }
@@ -591,7 +602,7 @@ impl Diff<Vec<u8>> for MCADiff {
     }
 
     fn revert(&self, new: &Vec<u8>) -> Vec<u8> {
-        let reader = Arc::new(MCAReader::from_bytes(new).unwrap());
+        let reader = Arc::new(MCAReader::from_bytes(new).expect(ERR_MSG_NEW));
         let enable_cost_stat = log_enabled!(Level::Debug);
 
         let results = parallel_process(create_chunk_ixz_iter(), |(i, x, z)| {
@@ -599,7 +610,7 @@ impl Diff<Vec<u8>> for MCADiff {
             let chunk_diff = &self.chunks[*i];
 
             let old_chunk = match new_chunk {
-                LazyChunk::Unloaded => panic!("new chunk is unloaded"),
+                LazyChunk::Unloaded => panic!("New chunk is unloaded"),
                 LazyChunk::NotExists => match chunk_diff {
                     ChunkWithTimestampDiff::BothNotExist => None,
                     ChunkWithTimestampDiff::DeleteSmall(ts_diff, blob_diff) => {
@@ -625,7 +636,7 @@ impl Diff<Vec<u8>> for MCADiff {
                                 timestamp: new_chunk
                                     .timestamp
                                     .checked_add_signed(-*ts_diff)
-                                    .expect("timestamp overflow"),
+                                    .expect("Timestamp overflow"),
                                 nbt: ChunkNbt::Small(ser(&chunk_diff.revert(&de(&nbt)))),
                             })
                         }
@@ -634,7 +645,7 @@ impl Diff<Vec<u8>> for MCADiff {
                                 timestamp: new_chunk
                                     .timestamp
                                     .checked_add_signed(-*ts_diff)
-                                    .expect("timestamp overflow"),
+                                    .expect("Timestamp overflow"),
                                 nbt: ChunkNbt::Large,
                             })
                         }
@@ -650,7 +661,7 @@ impl Diff<Vec<u8>> for MCADiff {
                             timestamp: new_chunk
                                 .timestamp
                                 .checked_add_signed(-*ts_diff)
-                                .expect("timestamp overflow"),
+                                .expect("Timestamp overflow"),
                             nbt: ChunkNbt::Large,
                         }),
                         ChunkWithTimestampDiff::SmallToLarge(ts_diff, blob_diff) => {
@@ -658,7 +669,7 @@ impl Diff<Vec<u8>> for MCADiff {
                                 timestamp: new_chunk
                                     .timestamp
                                     .checked_add_signed(-*ts_diff)
-                                    .expect("timestamp overflow"),
+                                    .expect("Timestamp overflow"),
                                 nbt: ChunkNbt::Small(blob_diff.revert0()),
                             })
                         }
@@ -739,7 +750,7 @@ mod tests {
                             ))
                         }
                     }
-                    _ => panic!("chunk should loaded"),
+                    _ => panic!("Chunk should loaded"),
                 };
                 let (timestamp_new, nbt_new) = match reader_new.get_chunk_lazily(x, z) {
                     LazyChunk::Some(chunk) => {
@@ -752,7 +763,7 @@ mod tests {
                             ))
                         }
                     }
-                    _ => panic!("chunk should loaded"),
+                    _ => panic!("Chunk should loaded"),
                 };
                 if timestamp_old == timestamp_new {
                     ts_unchanged_chunk_count += 1;

@@ -8,7 +8,7 @@ use crate::{
         Diff,
         base::{BlobDiff, MyersDiff},
     },
-    util::{fastnbt_deserialize as de, fastnbt_serialize as ser},
+    util::nbt_serde::{de, ser},
 };
 type XYZ = (i32, i32, i32);
 
@@ -29,65 +29,68 @@ pub struct BlockEntitiesDiff {
     new_xyz_list: Vec<XYZ>,
     map: BTreeMap<XYZ, BlockEntityDiff>,
 }
+
+static ERR_MSG: &str = "Failed to parse 'block_entities' section";
+
 fn build_bes_id_map_and_xyz_list(bes: &Value) -> (BTreeMap<XYZ, (String, &Value)>, Vec<XYZ>) {
     match bes {
         Value::List(bes) => {
             let i = bes.iter().map(|be| match be {
                 Value::Compound(kv) => {
-                    let x = match kv.get("x").unwrap() {
+                    let x = match kv.get("x").expect(ERR_MSG) {
                         Value::Int(i) => *i,
-                        _ => panic!("be.x should be Value::Int"),
+                        _ => panic!("'be.x' should be Value::Int"),
                     };
-                    let y = match kv.get("y").unwrap() {
+                    let y = match kv.get("y").expect(ERR_MSG) {
                         Value::Int(i) => *i,
-                        _ => panic!("be.y should be Value::Int"),
+                        _ => panic!("'be.y' should be Value::Int"),
                     };
-                    let z = match kv.get("z").unwrap() {
+                    let z = match kv.get("z").expect(ERR_MSG) {
                         Value::Int(i) => *i,
-                        _ => panic!("be.z should be Value::Int"),
+                        _ => panic!("'be.z' should be Value::Int"),
                     };
-                    let id = match kv.get("id").unwrap() {
+                    let id = match kv.get("id").expect(ERR_MSG) {
                         Value::String(s) => s.clone(),
-                        _ => panic!("be.id should be Value::String"),
+                        _ => panic!("'be.id' should be Value::String"),
                     };
                     ((x, y, z), (id, be))
                 }
-                _ => panic!("be should be Value::Compound"),
+                _ => panic!("'be' should be Value::Compound"),
             });
             (
                 BTreeMap::from_iter(i.clone()),
                 Vec::from_iter(i.clone().map(|(xyz, _)| xyz)),
             )
         }
-        _ => panic!("bes should be Value::List"),
+        _ => panic!("'bes' should be Value::List"),
     }
 }
 fn build_bes_map(bes: &Value) -> BTreeMap<XYZ, Value> {
     match bes {
         Value::List(bes) => BTreeMap::from_iter(bes.iter().map(|be| match be {
             Value::Compound(kv) => {
-                let x = match kv.get("x").unwrap() {
+                let x = match kv.get("x").expect(ERR_MSG) {
                     Value::Int(i) => *i,
-                    _ => panic!("be.x should be Value::Int"),
+                    _ => panic!("'be.x' should be Value::Int"),
                 };
-                let y = match kv.get("y").unwrap() {
+                let y = match kv.get("y").expect(ERR_MSG) {
                     Value::Int(i) => *i,
-                    _ => panic!("be.y should be Value::Int"),
+                    _ => panic!("'be.y' should be Value::Int"),
                 };
-                let z = match kv.get("z").unwrap() {
+                let z = match kv.get("z").expect(ERR_MSG) {
                     Value::Int(i) => *i,
-                    _ => panic!("be.z should be Value::Int"),
+                    _ => panic!("'be.z' should be Value::Int"),
                 };
                 ((x, y, z), be.clone())
             }
-            _ => panic!("be should be Value::Compound"),
+            _ => panic!("'be' should be Value::Compound"),
         })),
-        _ => panic!("bes should be Value::List"),
+        _ => panic!("'bes' should be Value::List"),
     }
 }
 fn build_bes_value(mut map: BTreeMap<XYZ, Value>, xyz_list: &Vec<XYZ>) -> Value {
     Value::List(Vec::from_iter(
-        xyz_list.iter().map(|k| map.remove(k).unwrap()),
+        xyz_list.iter().map(|k| map.remove(k).expect(ERR_MSG)),
     ))
 }
 impl Diff<Value> for BlockEntitiesDiff {
@@ -104,27 +107,25 @@ impl Diff<Value> for BlockEntitiesDiff {
             let old = old_bes_map.get(xyz);
             let new = new_bes_map.get(xyz);
             let diff = match (old, new) {
-                (None, None) => panic!("block not exists in both old and new block entities"),
-                (None, Some((_, v))) => BlockEntityDiff::Create(BlobDiff::from_compare(
-                    &Vec::with_capacity(0),
-                    &fastnbt::to_bytes(v).unwrap(),
-                )),
-                (Some((_, v)), None) => BlockEntityDiff::Delete(BlobDiff::from_compare(
-                    &fastnbt::to_bytes(v).unwrap(),
-                    &Vec::with_capacity(0),
-                )),
+                (None, None) => panic!("Block not exists in both old and new block entities"),
+                (None, Some((_, v))) => {
+                    BlockEntityDiff::Create(BlobDiff::from_compare(&Vec::with_capacity(0), &ser(v)))
+                }
+                (Some((_, v)), None) => {
+                    BlockEntityDiff::Delete(BlobDiff::from_compare(&ser(v), &Vec::with_capacity(0)))
+                }
                 (Some((old_id, old_v)), Some((new_id, new_v))) => {
                     if old_id == new_id {
                         log::info!("sameID");
                         BlockEntityDiff::UpdateSameBlockEntityID(MyersDiff::from_compare(
-                            &fastnbt::to_bytes(old_v).unwrap(),
-                            &fastnbt::to_bytes(new_v).unwrap(),
+                            &ser(old_v),
+                            &ser(new_v),
                         ))
                     } else {
                         log::info!("blob");
                         BlockEntityDiff::UpdateDiffBlockEntityID(BlobDiff::from_compare(
-                            &fastnbt::to_bytes(old_v).unwrap(),
-                            &fastnbt::to_bytes(new_v).unwrap(),
+                            &ser(old_v),
+                            &ser(new_v),
                         ))
                     }
                 }
@@ -152,7 +153,7 @@ impl Diff<Value> for BlockEntitiesDiff {
             let base_diff = base.map.get(xyz);
             let squashing_diff = squashing.map.get(xyz);
             let squashed = match (base_diff, squashing_diff) {
-                (None, None) => panic!("diff in {:?} not exists in both base and squash", xyz),
+                (None, None) => panic!("Diff in {:?} not exists in both base and squash", xyz),
                 (None, Some(squashing_diff)) => Some(squashing_diff.clone()),
                 (Some(base_diff), None) => Some(base_diff.clone()),
                 (Some(base_diff), Some(squashing_diff)) => {
@@ -229,7 +230,7 @@ impl Diff<Value> for BlockEntitiesDiff {
 
                         // panics
                         _ => {
-                            panic!("mismatched base diff and squashing diff")
+                            panic!("Mismatched base diff and squashing diff")
                         }
                     }
                 }
@@ -256,7 +257,7 @@ impl Diff<Value> for BlockEntitiesDiff {
                 (Some(_), BlockEntityDiff::UpdateDiffBlockEntityID(diff)) => {
                     Some(de(&diff.patch0()))
                 }
-                (old_be, diff) => panic!("unmatching {:?} and {:?}", old_be, diff),
+                (old_be, diff) => panic!("Unmatching {:?} and {:?}", old_be, diff),
             };
             match new_be {
                 Some(be) => bes_map.insert(*xyz, be),
@@ -279,7 +280,7 @@ impl Diff<Value> for BlockEntitiesDiff {
                 (BlockEntityDiff::UpdateDiffBlockEntityID(diff), Some(_)) => {
                     Some(de(&diff.revert0()))
                 }
-                (diff, new_be) => panic!("unmatching {:?} and {:?}", diff, new_be),
+                (diff, new_be) => panic!("Unmatching {:?} and {:?}", diff, new_be),
             };
             match old_be {
                 Some(be) => bes_map.insert(*xyz, be),
@@ -298,7 +299,7 @@ mod tests {
     use crate::{
         diff::Diff,
         mca::{ChunkNbt, ChunkWithTimestamp},
-        util::test::get_test_chunk_by_xz,
+        util::{nbt_serde::de, test::get_test_chunk_by_xz},
     };
 
     use super::BlockEntitiesDiff;
@@ -312,9 +313,9 @@ mod tests {
             ChunkNbt::Small(nbt) => nbt,
         };
 
-        match fastnbt::from_bytes(&nbt).unwrap() {
+        match de(&nbt) {
             Value::Compound(mut map) => map.remove("block_entities").unwrap(),
-            _ => panic!("root is not Value::Compound"),
+            _ => panic!("Root is not Value::Compound"),
         }
     }
     #[test]

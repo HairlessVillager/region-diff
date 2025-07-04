@@ -4,7 +4,7 @@ use fastnbt::Value;
 use crate::{
     compress::CompressionType,
     diff::{Diff, base::BlobDiff, nbt::ChunkDiff},
-    util::{fastnbt_deserialize as de, fastnbt_serialize as ser},
+    util::nbt_serde::{de, ser},
 };
 
 #[derive(Debug, Clone, Encode, Decode)]

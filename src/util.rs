@@ -8,11 +8,13 @@ pub fn create_chunk_ixz_iter() -> impl Iterator<Item = IXZ> {
     })
 }
 
-pub fn fastnbt_serialize(v: &fastnbt::Value) -> Vec<u8> {
-    fastnbt::to_bytes(v).unwrap()
-}
-pub fn fastnbt_deserialize(input: &[u8]) -> fastnbt::Value {
-    fastnbt::from_bytes(input).unwrap()
+pub mod nbt_serde {
+    pub fn ser(v: &fastnbt::Value) -> Vec<u8> {
+        fastnbt::to_bytes(v).expect("Failed to serialize NBT data")
+    }
+    pub fn de(input: &[u8]) -> fastnbt::Value {
+        fastnbt::from_bytes(input).expect("Failed to deserialize NBT data")
+    }
 }
 
 pub mod serde {
@@ -26,13 +28,13 @@ pub mod serde {
         .with_big_endian()
         .with_variable_int_encoding();
 
-    pub fn serialize<T: Encode>(val: T) -> Vec<u8> {
-        encode_to_vec(val, CONFIG.clone()).unwrap()
+    pub fn ser<T: Encode>(val: T) -> Vec<u8> {
+        encode_to_vec(val, CONFIG.clone()).expect("Failed to serialize object to bytes")
     }
-    pub fn deserialize<T: Decode<()>>(data: &Vec<u8>) -> T {
+    pub fn de<T: Decode<()>>(data: &Vec<u8>) -> T {
         decode_from_slice(data, CONFIG.clone())
             .map(|(de, _)| de)
-            .unwrap()
+            .expect("Failed to deserialize object from bytes")
     }
 }
 
@@ -57,7 +59,7 @@ pub mod parallel {
         let pool = ThreadPoolBuilder::new()
             .num_threads(crate::config::get_config().threads)
             .build()
-            .unwrap();
+            .expect("Failed to build thread pool");
 
         pool.install(|| {
             task_generator
@@ -88,7 +90,7 @@ pub mod parallel {
         let pool = ThreadPoolBuilder::new()
             .num_threads(crate::config::get_config().threads)
             .build()
-            .unwrap();
+            .expect("Failed to build thread pool");
 
         log::trace!("sorting tasks for load balance...");
         let mut tasks = task_generator.collect::<Vec<_>>();
@@ -193,9 +195,9 @@ pub mod test {
     }
     pub fn assert_mcc_eq(a: Vec<u8>, b: Vec<u8>) {
         let decompressed_a = CompressionType::Zlib.decompress_all(&a).unwrap();
-        let nbt_a = util::fastnbt_deserialize(&decompressed_a);
+        let nbt_a = util::nbt_serde::de(&decompressed_a);
         let decompressed_b = CompressionType::Zlib.decompress_all(&b).unwrap();
-        let nbt_b = util::fastnbt_deserialize(&decompressed_b);
+        let nbt_b = util::nbt_serde::de(&decompressed_b);
         assert_eq!(nbt_a, nbt_b);
     }
     pub fn get_test_chunk(path: &PathBuf, rng: &mut StdRng) -> impl Iterator<Item = Vec<u8>> {

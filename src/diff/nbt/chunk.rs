@@ -1,7 +1,10 @@
 use bincode::{Decode, Encode};
 use fastnbt::Value;
 
-use crate::diff::{Diff, base::MyersDiff, nbt::BlockEntitiesDiff};
+use crate::{
+    diff::{Diff, base::MyersDiff, nbt::BlockEntitiesDiff},
+    util::nbt_serde::{de, ser},
+};
 
 #[derive(Debug, Encode, Decode, Clone)]
 pub struct ChunkDiff {
@@ -9,6 +12,10 @@ pub struct ChunkDiff {
     sections: Vec<MyersDiff>,
     others: MyersDiff,
 }
+
+static ERR_MSG_OLD: &str = "Invalid old nbt";
+static ERR_MSG_NEW: &str = "Invalid new nbt";
+
 impl Diff<Value> for ChunkDiff {
     fn from_compare(old: &Value, new: &Value) -> Self
     where
@@ -16,39 +23,39 @@ impl Diff<Value> for ChunkDiff {
     {
         let mut old = match old {
             Value::Compound(x) => x.clone(),
-            _ => panic!("invalid old nbt"),
+            _ => panic!("{}", ERR_MSG_OLD),
         };
         let mut new = match new {
             Value::Compound(x) => x.clone(),
-            _ => panic!("invalid new nbt"),
+            _ => panic!("{}", ERR_MSG_NEW),
         };
 
         let diff_block_entities;
         {
-            let old_block_entities = old.remove("block_entities").unwrap();
-            let new_block_entities = new.remove("block_entities").unwrap();
+            let old_block_entities = old.remove("block_entities").expect(ERR_MSG_OLD);
+            let new_block_entities = new.remove("block_entities").expect(ERR_MSG_NEW);
             diff_block_entities =
                 BlockEntitiesDiff::from_compare(&old_block_entities, &new_block_entities);
         }
 
         let diff_sections;
         {
-            let old_sections = old.remove("sections").unwrap();
+            let old_sections = old.remove("sections").expect(ERR_MSG_OLD);
             let old_sections = match old_sections {
                 Value::List(x) => x,
-                _ => panic!("invalid old nbt"),
+                _ => panic!("{}", ERR_MSG_OLD),
             };
-            let new_sections = new.remove("sections").unwrap();
+            let new_sections = new.remove("sections").expect(ERR_MSG_NEW);
             let new_sections = match new_sections {
                 Value::List(x) => x,
-                _ => panic!("invalid new nbt"),
+                _ => panic!("{}", ERR_MSG_NEW),
             };
             assert_eq!(old_sections.len(), new_sections.len());
 
             let mut mut_diff_sections = Vec::with_capacity(old_sections.len());
             for (old, new) in old_sections.iter().zip(new_sections.iter()) {
-                let old = fastnbt::to_bytes(old).unwrap();
-                let new = fastnbt::to_bytes(new).unwrap();
+                let old = ser(old);
+                let new = ser(new);
                 let diff = MyersDiff::from_compare(&old, &new);
                 mut_diff_sections.push(diff);
             }
@@ -57,8 +64,8 @@ impl Diff<Value> for ChunkDiff {
 
         let diff_others;
         {
-            let old_others = fastnbt::to_bytes(&Value::Compound(old.clone())).unwrap();
-            let new_others = fastnbt::to_bytes(&Value::Compound(new.clone())).unwrap();
+            let old_others = ser(&Value::Compound(old.clone()));
+            let new_others = ser(&Value::Compound(new.clone()));
             diff_others = MyersDiff::from_compare(&old_others, &new_others);
         }
 
@@ -92,29 +99,29 @@ impl Diff<Value> for ChunkDiff {
     fn patch(&self, old: &Value) -> Value {
         let mut old = match old {
             Value::Compound(x) => x.clone(),
-            _ => panic!("invalid old nbt"),
+            _ => panic!("{}", ERR_MSG_OLD),
         };
 
         let block_entities;
         {
-            let old_block_entities = old.remove("block_entities").unwrap();
+            let old_block_entities = old.remove("block_entities").expect(ERR_MSG_OLD);
             block_entities = self.block_entities.patch(&old_block_entities);
         }
 
         let sections: Vec<Value>;
         {
-            let old_sections = old.remove("sections").unwrap();
+            let old_sections = old.remove("sections").expect(ERR_MSG_OLD);
             let old_sections = match old_sections {
                 Value::List(x) => x,
-                _ => panic!("invalid old nbt"),
+                _ => panic!("{}", ERR_MSG_OLD),
             };
             sections = old_sections
                 .iter()
                 .zip(self.sections.iter())
                 .map(|(old, diff)| {
-                    let old = fastnbt::to_bytes(old).unwrap();
+                    let old = ser(old);
                     let new = diff.patch(&old);
-                    let new = fastnbt::from_bytes(&new).unwrap();
+                    let new = de(&new);
                     new
                 })
                 .collect()
@@ -122,12 +129,12 @@ impl Diff<Value> for ChunkDiff {
 
         let mut others;
         {
-            let old_others = fastnbt::to_bytes(&Value::Compound(old)).unwrap();
+            let old_others = ser(&Value::Compound(old));
             let new_others = self.others.patch(&old_others);
-            let wrapped_others: Value = fastnbt::from_bytes(&new_others).unwrap();
+            let wrapped_others: Value = de(&new_others);
             others = match wrapped_others {
                 Value::Compound(x) => x,
-                _ => panic!("invalid new nbt"),
+                _ => panic!("{}", ERR_MSG_NEW),
             }
         }
 
@@ -140,41 +147,41 @@ impl Diff<Value> for ChunkDiff {
     fn revert(&self, new: &Value) -> Value {
         let mut new = match new {
             Value::Compound(x) => x.clone(),
-            _ => panic!("invalid new nbt"),
+            _ => panic!("{}", ERR_MSG_NEW),
         };
 
         let block_entities;
         {
-            let new_block_entities = new.remove("block_entities").unwrap();
+            let new_block_entities = new.remove("block_entities").expect(ERR_MSG_NEW);
             block_entities = self.block_entities.revert(&new_block_entities);
         }
 
         let sections: Vec<Value>;
         {
-            let new_sections = new.remove("sections").unwrap();
+            let new_sections = new.remove("sections").expect(ERR_MSG_NEW);
             let new_sections = match new_sections {
                 Value::List(x) => x,
-                _ => panic!("invalid new nbt"),
+                _ => panic!("{}", ERR_MSG_NEW),
             };
             sections = new_sections
                 .iter()
                 .zip(self.sections.iter())
                 .map(|(new_section, diff)| {
-                    let new_bytes = fastnbt::to_bytes(new_section).unwrap();
+                    let new_bytes = ser(new_section);
                     let old_bytes = diff.revert(&new_bytes);
-                    fastnbt::from_bytes(&old_bytes).unwrap()
+                    de(&old_bytes)
                 })
                 .collect();
         }
 
         let mut others;
         {
-            let new_others = fastnbt::to_bytes(&Value::Compound(new)).unwrap();
+            let new_others = ser(&Value::Compound(new));
             let old_others = self.others.revert(&new_others);
-            let wrapped_others: Value = fastnbt::from_bytes(&old_others).unwrap();
+            let wrapped_others: Value = de(&old_others);
             others = match wrapped_others {
                 Value::Compound(x) => x,
-                _ => panic!("invalid old nbt"),
+                _ => panic!("{}", ERR_MSG_OLD),
             };
         }
 
@@ -208,8 +215,8 @@ mod tests {
             );
             let mut new_iter = get_test_chunk(&binding, &mut rng_new);
             for _ in 0..50 {
-                let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
-                let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
+                let old = de(&old_iter.next().unwrap());
+                let new = de(&new_iter.next().unwrap());
                 let diff = ChunkDiff::from_compare(&old, &new);
                 let patched_old = diff.patch(&old);
                 let reverted_new = diff.revert(&new);
@@ -235,9 +242,9 @@ mod tests {
             );
             let mut v2_iter = get_test_chunk(&binding, &mut rng_v2);
             for _ in 0..50 {
-                let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
-                let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
-                let v2 = fastnbt::from_bytes(&v2_iter.next().unwrap()).unwrap();
+                let v0 = de(&v0_iter.next().unwrap());
+                let v1 = de(&v1_iter.next().unwrap());
+                let v2 = de(&v2_iter.next().unwrap());
                 let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
                 let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
                 let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);
@@ -268,8 +275,8 @@ mod tests {
             );
             let mut new_iter = get_test_chunk(&binding, &mut rng_new);
             for _ in 0..10 {
-                let old = fastnbt::from_bytes(&old_iter.next().unwrap()).unwrap();
-                let new = fastnbt::from_bytes(&new_iter.next().unwrap()).unwrap();
+                let old = de(&old_iter.next().unwrap());
+                let new = de(&new_iter.next().unwrap());
                 let diff = ChunkDiff::from_compare(&old, &new);
                 let patched_old = diff.patch(&old);
                 let reverted_new = diff.revert(&new);
@@ -297,9 +304,9 @@ mod tests {
             );
             let mut v2_iter = get_test_chunk(&binding, &mut rng_v2);
             for _ in 0..10 {
-                let v0 = fastnbt::from_bytes(&v0_iter.next().unwrap()).unwrap();
-                let v1 = fastnbt::from_bytes(&v1_iter.next().unwrap()).unwrap();
-                let v2 = fastnbt::from_bytes(&v2_iter.next().unwrap()).unwrap();
+                let v0 = de(&v0_iter.next().unwrap());
+                let v1 = de(&v1_iter.next().unwrap());
+                let v2 = de(&v2_iter.next().unwrap());
                 let diff_v01 = ChunkDiff::from_compare(&v0, &v1);
                 let diff_v12 = ChunkDiff::from_compare(&v1, &v2);
                 let squashed_diff = ChunkDiff::from_squash(&diff_v01, &diff_v12);

@@ -3,13 +3,13 @@ use std::sync::OnceLock;
 
 use crate::logging::init_log;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub log_config: LogConfig,
     pub threads: usize,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum LogConfig {
     Trace,
@@ -30,7 +30,7 @@ pub fn init_config(config: Config) {
     {
         CONFIG
             .set(config.clone())
-            .unwrap_or_else(|_| panic!("cannot init config twice"));
+            .expect("Cannot init config twice");
     }
 
     #[cfg(test)]

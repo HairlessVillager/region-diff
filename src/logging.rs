@@ -20,8 +20,10 @@ fn map_level_to_str(level: Level) -> &'static str {
     }
 }
 
+static ERR_MSG: &str = "Failed to write log file";
+
 fn write_trace_log_file(writer: &Mutex<LineWriter<File>>, record: &Record) {
-    let mut writer = writer.lock().unwrap();
+    let mut writer = writer.lock().expect(ERR_MSG);
     writeln!(
         writer,
         "[{:<5} {} {} {:?}] {}",
@@ -31,11 +33,11 @@ fn write_trace_log_file(writer: &Mutex<LineWriter<File>>, record: &Record) {
         std::thread::current().id(),
         record.args()
     )
-    .unwrap();
+    .expect(ERR_MSG);
 }
 
 fn write_debug_log_file(writer: &Mutex<LineWriter<File>>, record: &Record) {
-    let mut writer = writer.lock().unwrap();
+    let mut writer = writer.lock().expect(ERR_MSG);
     writeln!(
         writer,
         "[{:<5} {}] {}",
@@ -43,7 +45,7 @@ fn write_debug_log_file(writer: &Mutex<LineWriter<File>>, record: &Record) {
         now().format("%H:%M:%S%.6f").to_string(),
         record.args()
     )
-    .unwrap();
+    .expect(ERR_MSG);
 }
 
 fn write_console_log(record: &Record) {
@@ -95,8 +97,8 @@ mod prod {
 
         fn flush(&self) {
             if let Some(writer) = &self.writer {
-                let mut writer = writer.lock().unwrap();
-                writer.flush().unwrap();
+                let mut writer = writer.lock().expect(ERR_MSG);
+                writer.flush().expect(ERR_MSG);
             }
         }
     }
@@ -104,9 +106,8 @@ mod prod {
     impl Drop for ProductionLogger {
         fn drop(&mut self) {
             if let Some(writer) = &mut self.writer {
-                if let Ok(mut writer) = writer.lock() {
-                    let _ = writer.flush();
-                }
+                let mut writer = writer.lock().expect(ERR_MSG);
+                writer.flush().expect(ERR_MSG);
             }
         }
     }
@@ -141,16 +142,15 @@ mod dev {
         }
 
         fn flush(&self) {
-            let mut writer = self.writer.lock().unwrap();
-            writer.flush().unwrap();
+            let mut writer = self.writer.lock().expect(ERR_MSG);
+            writer.flush().expect(ERR_MSG);
         }
     }
 
     impl Drop for DevelopmentLogger {
         fn drop(&mut self) {
-            if let Ok(mut writer) = self.writer.lock() {
-                let _ = writer.flush();
-            }
+            let mut writer = self.writer.lock().expect(ERR_MSG);
+            writer.flush().expect(ERR_MSG);
         }
     }
 }

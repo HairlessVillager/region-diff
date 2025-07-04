@@ -145,7 +145,7 @@ mod tests {
             for (_, x, z) in create_chunk_ixz_iter() {
                 let chunk = reader_0.get_chunk_lazily(x, z);
                 match chunk {
-                    LazyChunk::Unloaded => panic!("invalid MCAReader"),
+                    LazyChunk::Unloaded => panic!("Invalid MCAReader"),
                     LazyChunk::NotExists => (),
                     LazyChunk::Some(chunk) => builder_0.set_chunk(x, z, &chunk),
                 }
@@ -160,7 +160,7 @@ mod tests {
             for (_, x, z) in create_chunk_ixz_iter() {
                 let chunk = reader_1.get_chunk_lazily(x, z);
                 match chunk {
-                    LazyChunk::Unloaded => panic!("invalid MCAReader"),
+                    LazyChunk::Unloaded => panic!("Invalid MCAReader"),
                     LazyChunk::NotExists => (),
                     LazyChunk::Some(chunk) => builder_1.set_chunk(x, z, &chunk),
                 }

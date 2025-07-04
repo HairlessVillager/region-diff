@@ -44,6 +44,8 @@ enum VxPtr {
     Disable(usize),
 }
 
+static ERR_MSG: &str = "Failed to squash MyersDiff";
+
 impl Diff<Vec<u8>> for MyersDiff {
     fn from_compare(old: &Vec<u8>, new: &Vec<u8>) -> Self {
         let mut diff = Self {
@@ -235,7 +237,7 @@ impl MyersDiff {
                         VxPtr::Enable(ptr) => {
                             let size = re.v1_idx - ptr;
                             let mut buffer = vec![0; size];
-                            squashing_old_text.read_exact(&mut buffer).unwrap();
+                            squashing_old_text.read_exact(&mut buffer).expect(ERR_MSG);
                             diff.old_text.extend_from_slice(&buffer);
                             v1_ptr = VxPtr::Disable(re.v1_idx);
                         }
@@ -250,7 +252,7 @@ impl MyersDiff {
                         VxPtr::Enable(ptr) => {
                             let size = re.v0_idx - ptr;
                             let mut buffer = vec![0; size];
-                            base_old_text.read_exact(&mut buffer).unwrap();
+                            base_old_text.read_exact(&mut buffer).expect(ERR_MSG);
                             diff.old_text.extend_from_slice(&buffer);
                             v0_ptr = VxPtr::Disable(re.v0_idx);
                         }
@@ -258,14 +260,16 @@ impl MyersDiff {
                     match v1_ptr {
                         VxPtr::Disable(ptr) => {
                             let step = re.v1_idx - ptr;
-                            base_new_text.seek_relative(step as i64).unwrap();
-                            squashing_old_text.seek_relative(step as i64).unwrap();
+                            base_new_text.seek_relative(step as i64).expect(ERR_MSG);
+                            squashing_old_text
+                                .seek_relative(step as i64)
+                                .expect(ERR_MSG);
                             v1_ptr = VxPtr::Enable(re.v1_idx);
                         }
                         VxPtr::Enable(ptr) => {
                             let size = re.v1_idx - ptr;
                             let mut buffer = vec![0; size];
-                            base_new_text.read_exact(&mut buffer).unwrap();
+                            base_new_text.read_exact(&mut buffer).expect(ERR_MSG);
                             diff.new_text.extend_from_slice(&buffer);
                             v1_ptr = VxPtr::Disable(re.v1_idx);
                         }
@@ -278,7 +282,7 @@ impl MyersDiff {
                         VxPtr::Enable(ptr) => {
                             let size = re.v1_idx - ptr;
                             let mut buffer = vec![0; size];
-                            base_new_text.read_exact(&mut buffer).unwrap();
+                            base_new_text.read_exact(&mut buffer).expect(ERR_MSG);
                             diff.new_text.extend_from_slice(&buffer);
                             v1_ptr = VxPtr::Disable(re.v1_idx);
                         }
@@ -295,14 +299,16 @@ impl MyersDiff {
                     match v1_ptr {
                         VxPtr::Disable(ptr) => {
                             let step = re.v1_idx - ptr;
-                            base_new_text.seek_relative(step as i64).unwrap();
-                            squashing_old_text.seek_relative(step as i64).unwrap();
+                            base_new_text.seek_relative(step as i64).expect(ERR_MSG);
+                            squashing_old_text
+                                .seek_relative(step as i64)
+                                .expect(ERR_MSG);
                             v1_ptr = VxPtr::Enable(re.v1_idx);
                         }
                         VxPtr::Enable(ptr) => {
                             let size = re.v1_idx - ptr;
                             let mut buffer = vec![0; size];
-                            squashing_old_text.read_exact(&mut buffer).unwrap();
+                            squashing_old_text.read_exact(&mut buffer).expect(ERR_MSG);
                             diff.old_text.extend_from_slice(&buffer);
                             v1_ptr = VxPtr::Disable(re.v1_idx);
                         }
@@ -314,7 +320,7 @@ impl MyersDiff {
                         VxPtr::Enable(ptr) => {
                             let size = re.v2_idx - ptr;
                             let mut buffer = vec![0; size];
-                            squashing_new_text.read_exact(&mut buffer).unwrap();
+                            squashing_new_text.read_exact(&mut buffer).expect(ERR_MSG);
                             diff.new_text.extend_from_slice(&buffer);
                             v2_ptr = VxPtr::Disable(re.v2_idx);
                         }

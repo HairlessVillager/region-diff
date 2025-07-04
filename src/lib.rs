@@ -7,7 +7,7 @@ pub mod util;
 
 use std::{
     fs::{self, File},
-    io::{self, Cursor, Write},
+    io::{Cursor, Write},
     path::PathBuf,
 };
 
@@ -17,7 +17,7 @@ use crate::{
     compress::CompressionType,
     config::{Config, LogConfig, init_config},
     diff::{Diff, file::MCADiff},
-    util::serde::{deserialize, serialize},
+    util::serde::{de, ser},
 };
 
 #[derive(Debug, Parser)]
@@ -103,6 +103,12 @@ pub enum FileType {
     RegionMcc,
 }
 
+static ERR_MSG_READ: &str = "Failed to read file";
+static ERR_MSG_CREATE: &str = "Failed to create file";
+static ERR_MSG_WRITE: &str = "Failed to write file";
+static ERR_MSG_COMPRESS: &str = "Failed to compress data";
+static ERR_MSG_DECOMPRESS: &str = "Failed to decompress data";
+
 pub fn main() {
     let cli = Cli::parse();
     init_config(Config {
@@ -120,82 +126,92 @@ pub fn main() {
             let diff = match cli.filetype {
                 FileType::RegionMca => {
                     let diff = MCADiff::from_compare(&old, &new);
-                    serialize(diff)
+                    ser(diff)
                 }
                 FileType::RegionMcc => todo!(),
             };
             log::info!("writing diff file...");
             let mut reader = Cursor::new(diff);
-            let mut writer = File::create(PathBuf::from(args.diff)).unwrap();
+            let mut writer = File::create(PathBuf::from(args.diff)).expect(ERR_MSG_CREATE);
             cli.compression_type
                 .compress(&mut reader, &mut writer)
-                .unwrap();
-            writer.flush().unwrap();
+                .expect(ERR_MSG_COMPRESS);
+            writer.flush().expect(ERR_MSG_WRITE);
         }
         Commands::Squash(args) => {
             log::info!("reading base diff file...");
-            let base = fs::read(PathBuf::from(args.base)).unwrap();
-            let base = cli.compression_type.decompress_all(base).unwrap();
+            let base = fs::read(PathBuf::from(args.base)).expect(ERR_MSG_READ);
+            let base = cli
+                .compression_type
+                .decompress_all(base)
+                .expect(ERR_MSG_DECOMPRESS);
             log::info!("reading squashing diff file...");
-            let squashing = fs::read(PathBuf::from(args.squashing)).unwrap();
-            let squashing = cli.compression_type.decompress_all(squashing).unwrap();
+            let squashing = fs::read(PathBuf::from(args.squashing)).expect(ERR_MSG_READ);
+            let squashing = cli
+                .compression_type
+                .decompress_all(squashing)
+                .expect(ERR_MSG_DECOMPRESS);
             log::info!("squashing...");
             let squashed = match cli.filetype {
                 FileType::RegionMca => {
-                    let base: MCADiff = deserialize(&base);
-                    let squashing: MCADiff = deserialize(&squashing);
+                    let base: MCADiff = de(&base);
+                    let squashing: MCADiff = de(&squashing);
                     let squashed = MCADiff::from_squash(&base, &squashing);
-                    serialize(squashed)
+                    ser(squashed)
                 }
                 FileType::RegionMcc => todo!(),
             };
             log::info!("writing squashed diff file...");
             let mut reader = Cursor::new(squashed);
-            let mut writer = File::create(PathBuf::from(args.squashed)).unwrap();
+            let mut writer = File::create(PathBuf::from(args.squashed)).expect(ERR_MSG_CREATE);
             cli.compression_type
                 .compress(&mut reader, &mut writer)
-                .unwrap();
-            writer.flush().unwrap();
+                .expect(ERR_MSG_COMPRESS);
+            writer.flush().expect(ERR_MSG_WRITE);
         }
         Commands::Patch(args) => {
             log::info!("reading old file...");
-            let old = fs::read(PathBuf::from(args.old)).unwrap();
+            let old = fs::read(PathBuf::from(args.old)).expect(ERR_MSG_READ);
             log::info!("reading diff file...");
-            let diff = fs::read(PathBuf::from(args.diff)).unwrap();
-            let diff = cli.compression_type.decompress_all(diff).unwrap();
+            let diff = fs::read(PathBuf::from(args.diff)).expect(ERR_MSG_READ);
+            let diff = cli
+                .compression_type
+                .decompress_all(diff)
+                .expect(ERR_MSG_DECOMPRESS);
             log::info!("patching...");
             let patched = match cli.filetype {
                 FileType::RegionMca => {
-                    let diff: MCADiff = deserialize(&diff);
+                    let diff: MCADiff = de(&diff);
                     diff.patch(&old)
                 }
                 FileType::RegionMcc => todo!(),
             };
             log::info!("writing patched file...");
-            let mut reader = Cursor::new(patched);
-            let mut writer = File::create(PathBuf::from(args.patched)).unwrap();
-            io::copy(&mut reader, &mut writer).unwrap();
-            writer.flush().unwrap();
+            let mut writer = File::create(PathBuf::from(args.patched)).expect(ERR_MSG_CREATE);
+            writer.write_all(&patched).expect(ERR_MSG_WRITE);
+            writer.flush().expect(ERR_MSG_WRITE);
         }
         Commands::Revert(args) => {
             log::info!("reading new file...");
-            let new = fs::read(PathBuf::from(args.new)).unwrap();
+            let new = fs::read(PathBuf::from(args.new)).expect(ERR_MSG_READ);
             log::info!("reading diff file...");
-            let diff = fs::read(PathBuf::from(args.diff)).unwrap();
-            let diff = cli.compression_type.decompress_all(diff).unwrap();
+            let diff = fs::read(PathBuf::from(args.diff)).expect(ERR_MSG_READ);
+            let diff = cli
+                .compression_type
+                .decompress_all(diff)
+                .expect(ERR_MSG_DECOMPRESS);
             log::info!("reverting...");
             let reverted = match cli.filetype {
                 FileType::RegionMca => {
-                    let diff: MCADiff = deserialize(&diff);
+                    let diff: MCADiff = de(&diff);
                     diff.revert(&new)
                 }
                 FileType::RegionMcc => todo!(),
             };
             log::info!("writing reverted file...");
-            let mut reader = Cursor::new(reverted);
-            let mut writer = File::create(PathBuf::from(args.reverted)).unwrap();
-            io::copy(&mut reader, &mut writer).unwrap();
-            writer.flush().unwrap();
+            let mut writer = File::create(PathBuf::from(args.reverted)).expect(ERR_MSG_CREATE);
+            writer.write_all(&reverted).expect(ERR_MSG_WRITE);
+            writer.flush().expect(ERR_MSG_WRITE);
         }
     }
     log::info!("success");

@@ -329,29 +329,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn test_fastnbt_works() {
-        use fastnbt::{Value, nbt};
-        let x = nbt!({
-            "string": "Hello World",
-            "number": 42,
-            "nested": {
-                "array": [1, 2, 3, 4, 5],
-                "compound": {
-                    "name": "test",
-                    "value": 3.14,
-                    "list": ["a", "b", "c"]
-                }
-            },
-            "boolean": 1_i8,
-            "long_array": [1_i64, 2_i64, 3_i64]
-        });
-
-        let y = fastnbt::to_bytes(&x).expect("Failed to serialize NBT");
-        let z: Value = fastnbt::from_bytes(&y).expect("Failed to deserialize NBT");
-        let w = fastnbt::to_bytes(&z).expect("Failed to re-serialize NBT");
-        assert_eq!(y, w);
-        assert_eq!(format!("{:?}", x), format!("{:?}", z));
-    }
 }
