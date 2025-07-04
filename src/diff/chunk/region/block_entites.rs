@@ -116,13 +116,13 @@ impl Diff<Value> for BlockEntitiesDiff {
                 }
                 (Some((old_id, old_v)), Some((new_id, new_v))) => {
                     if old_id == new_id {
-                        log::info!("sameID");
+                        log::trace!("sameID");
                         BlockEntityDiff::UpdateSameBlockEntityID(MyersDiff::from_compare(
                             &ser(old_v),
                             &ser(new_v),
                         ))
                     } else {
-                        log::info!("blob");
+                        log::trace!("blob");
                         BlockEntityDiff::UpdateDiffBlockEntityID(BlobDiff::from_compare(
                             &ser(old_v),
                             &ser(new_v),
