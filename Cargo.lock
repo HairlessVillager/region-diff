@@ -334,6 +334,7 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 [[package]]
 name = "fastnbt"
 version = "2.5.0"
+source = "git+https://github.com/HairlessVillager/fastnbt?branch=master#eff9fa88ff5340c5387abc4638e2591d9e78bafe"
 dependencies = [
  "byteorder",
  "cesu8",
